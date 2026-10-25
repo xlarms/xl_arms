@@ -346,8 +346,46 @@ function buildCatalog(files) {
   };
 }
 
+// --- Storefront mapping: importer schema -> the schema assets/app.js renders ---
+// app.js expects: sku, upc, title, brand, model, category, caliber (display),
+// caliber_canonical, action, barrel_in, capacity, finish, price, stock_qty,
+// is_firearm, description, images[]. This is the ONLY shape get-products.js
+// publishes to the shop, so a catalog that does not go through here will
+// not show up on the site even if the import itself succeeded.
+const FIREARM_DEPARTMENTS = new Set([1, 2, 3, 5, 6, 7]); // Handguns, Used Handguns/Long Guns, Long Guns, NFA, Black Powder
+function toStorefrontProduct(p) {
+  const a = p.attributes || {};
+  const caliberDisplay = (a.caliberRaw && a.caliberRaw[0]) || (a.caliber && a.caliber[0]) || '';
+  const barrelIn = a.barrelLength ? parseFloat(String(a.barrelLength).replace(/[^0-9.]/g, '')) : null;
+  return {
+    sku: p.sku, rsr_number: p.sku, upc: p.upc, title: p.title, brand: p.brand,
+    model: p.model, category: p.departmentName, caliber: caliberDisplay,
+    caliber_canonical: (a.caliber && a.caliber[0]) || '',
+    action: a.action || '', barrel_in: Number.isFinite(barrelIn) ? barrelIn : null,
+    capacity: a.capacity ? intVal(a.capacity) : null,
+    finish: (a.finish || []).join(', '),
+    price: p.price, stock_qty: p.stock, is_firearm: FIREARM_DEPARTMENTS.has(p.department),
+    description: p.sellcopy || p.description || '',
+    features: p.features || [], prop65: p.prop65, prop65Message: p.prop65Message || null,
+    groundOnly: p.groundOnly, adultSignature: p.adultSignature,
+    blockedFromDropShip: p.blockedFromDropShip,
+    // Images stay on the placeholder until the Wasabi/Bunny image-sync step
+    // replaces them with Bunny CDN URLs. Never use another product's photo.
+    images: ['images/placeholder.svg'],
+  };
+}
+function toStorefrontCatalog(catalog) {
+  return {
+    generated: catalog.generatedAt, stats: catalog.stats,
+    _note: 'Live RSR catalog — replaces the starter sample data. Prices are MAP, stock is main inventory.',
+    products: catalog.products.map(toStorefrontProduct),
+    dealers: catalog.dealers || [],
+  };
+}
+
 module.exports = {
   DEPARTMENTS, STATE_CODES, splitLine, canonicalCaliber, imageShard, imagePaths,
   parseInventory, parseAttributes, parseXref, parseRestrictions, isDropShipBlocked,
   parseMessages, parseRetailMap, parseSellDescriptions, parseFFL, parseDeleted, buildCatalog,
+  toStorefrontProduct, toStorefrontCatalog, FIREARM_DEPARTMENTS,
 };

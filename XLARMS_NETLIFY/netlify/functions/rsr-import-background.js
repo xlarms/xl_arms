@@ -25,7 +25,7 @@
 // For an offline run, Jonathan can download the ftpdownloads/ files with FileZilla
 // and run the parser locally: node scripts/test-importer.js proves the parsers,
 // and a local runner can call buildCatalog() with those file contents directly.
-const { buildCatalog } = require('./rsr-import');
+const { buildCatalog, toStorefrontCatalog } = require('./rsr-import');
 
 const DATA_FILES = {
   inventory: 'rsrinventory-new.txt',
@@ -77,12 +77,26 @@ exports.handler = async () => {
     // (The caller / store writer must implement the "keep old catalog" side — this
     // function throws instead of returning a catalog to publish.)
     if (catalog.stats.published === 0) throw new Error('Published product count is 0 — aborting, live catalog kept.');
+    // Publish to Netlify Blobs — the ONLY store get-products.js reads for the
+    // live shop. Writing here is atomic for this key: the old catalog stays
+    // live until this write succeeds, and a failed run never blanks the shop.
+    // NOTE: this is a background function, so Netlify returns 202 immediately
+    // and this handler runs in the background. The caller will NOT see the
+    // stats in the HTTP response — check the Functions log for 'RSR import OK',
+    // then reload the shop. Images stay on the placeholder until the separate
+    // Wasabi/Bunny image-sync step runs.
+    let blobs;
+    try { blobs = require('@netlify/blobs'); } catch {
+      throw new Error('@netlify/blobs is not installed — add it to package.json and redeploy before triggering the importer.');
+    }
+    const store = blobs.getStore('xl-arms-catalog');
+    const storefront = toStorefrontCatalog(catalog);
+    await store.set('products.json', JSON.stringify(storefront));
+    // Keep the full internal catalog (restrictions, messages, search index)
+    // alongside it for checkout / admin use, without bloating the shop payload.
+    await store.set('catalog-full.json', JSON.stringify(catalog));
     console.log('RSR import OK', JSON.stringify(catalog.stats), 'errors:', catalog.errors.slice(0, 20));
-    // Publish: in "file" mode this is data/products.json; in "blobs" mode the
-    // caller writes catalog.products + catalog.searchIndex + catalog.dealers to Blobs
-    // and swaps the live pointer only after the write succeeds. That store-writer
-    // step is deployment-specific and is intentionally not faked here.
-    return { statusCode: 202, body: JSON.stringify({ ok: true, stats: catalog.stats, errors: catalog.errors.slice(0, 20), note: 'Catalog built. Wire PRODUCT_STORE writer (file/blobs) before deploying this function live.' }) };
+    return { statusCode: 202, body: JSON.stringify({ ok: true, stats: catalog.stats, note: 'Background import started — check Functions log for RSR import OK, then reload the shop.' }) };
   } catch (e) {
     console.error('RSR import FAILED — live catalog kept:', e.message);
     return { statusCode: 202, body: JSON.stringify({ ok: false, error: e.message }) };

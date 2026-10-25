@@ -44,26 +44,34 @@ Recommended route (cleanest):
    - Or file-by-file: open `XLARMS_NETLIFY/`, open each file, top right
      → Delete file, commit. Tedious for ~15 files, so repo delete is
      usually faster.
-   RE-UPLOAD THE LATEST — DO IT AT THE REPO ROOT THIS TIME (recommended):
-   Extract this zip, then in GitHub Add file → Upload files, drag in the
-   EXTRACTED CONTENTS (index.html, netlify/, package.json, .gitignore,
-   NETLIFY-SETUP.md, etc. — not the zip itself, not node_modules).
-   Do NOT put them inside a `XLARMS_NETLIFY/` folder again. At the root,
-   the Netlify settings below are the simple ones.
-   If you instead re-upload inside `XLARMS_NETLIFY/` again, use the
-   alternative settings in brackets below.
+   ACTUAL LAYOUT 2026-10-25 (Jonathan, screenshot, commit badb282):
+   The latest files ARE in GitHub, but again inside `XLARMS_NETLIFY/`,
+   not at the repo root: `XLARMS_NETLIFY/index.html`,
+   `XLARMS_NETLIFY/package.json`, `XLARMS_NETLIFY/netlify.toml`,
+   `XLARMS_NETLIFY/netlify/functions/`, etc. That is fine — do NOT
+   re-upload again. Just point Netlify at that folder (step 3 below).
+   For future updates, upload new versions INTO `XLARMS_NETLIFY/`
+   (overwrite the files there), not at the repo root, or the Netlify
+   settings below will point at the wrong place again.
 2. In Netlify: Add new site → Import an existing project → GitHub →
    pick `xlarms/xl_arms` (authorize Netlify to read GitHub if asked).
-3. Netlify settings — for a ROOT upload (recommended):
-   - Base directory: (leave blank)
-   - Build command: leave blank (static site) or `npm install` if Netlify asks.
-   - Publish directory: `.`
-   - Functions directory: `netlify/functions`
-   [Alternative, only if files are inside XLARMS_NETLIFY/ again:
-   Base directory: `XLARMS_NETLIFY`, Publish: `.`, Functions:
-   `netlify/functions` — both relative to that base. If Base is left
-   blank with a nested upload, Netlify finds no index.html / package.json
-   / netlify.toml at the root and the deploy fails or publishes empty.]
+3. Netlify settings — for the ACTUAL layout (files in XLARMS_NETLIFY/):
+   - Base directory: `XLARMS_NETLIFY`
+   - Build command: `npm install`
+   - Publish directory: `.` (relative to the base above — NOT
+     `XLARMS_NETLIFY` again)
+   - Functions directory: `netlify/functions` (also relative to base)
+   If Base is left blank with this layout, Netlify looks at the repo
+   root, finds no package.json / netlify.toml, and fails with
+   'npm error ENOENT: no such file or directory, open
+   /opt/build/repo/package.json' — exactly the 6:19 PM and 6:25 PM
+   failures. Setting Base to XLARMS_NETLIFY fixes it with no GitHub
+   re-upload. To change it on an existing site: Project configuration
+   (or Site configuration → Build & deploy → Build settings) → Edit,
+   set Base directory, Save, then Deploys → Trigger deploy → Deploy site.
+   [Alternative, only if files are ever moved to the repo root:
+   Base directory: (leave blank), Publish: `.`, Functions:
+   `netlify/functions`.]
 4. Deploy. Netlify runs `npm install`, reads `package.json` (inside
    XLARMS_NETLIFY/), and bundles `basic-ftp` into the importer function
    automatically.
@@ -93,6 +101,35 @@ In Netlify, after you create the new site:
    read these as `process.env.RSR_FTP_HOST` etc. — the values are encrypted
    in Netlify and are never shown in code, logs, or chat.
 4. Do NOT paste the FTP password in chat, in a file, or in `netlify.toml`.
+
+## 3b. Triggering the importer — READY STEPS (2026-10-25 update)
+
+IMPORTANT: before triggering, upload THIS latest package to GitHub
+(into `XLARMS_NETLIFY/`, commit) and let Netlify redeploy it. Earlier
+packages had a store-writer gap: the importer built a catalog but did
+not write it anywhere the shop could read. This package fixes that:
+importer writes to Netlify Blobs (`xl-arms-catalog`), `get-products.js`
+reads Blobs first, and the shop (`assets/app.js`) fetches `/api/products`
+first, falling back to the sample file only before the first import.
+`@netlify/blobs` and `basic-ftp` are both in `package.json`, so
+`npm install` on deploy installs them.
+1. In Netlify: Project configuration → Environment variables → add
+   `RSR_FTP_HOST`, `RSR_FTP_USER`, `RSR_FTP_PASS`, `RSR_FTP_DIR=ftpdownloads`
+   (scope: All scopes). Save.
+2. Trigger the importer by opening in your browser:
+   `https://xl-arms.netlify.app/.netlify/functions/rsr-import-background`
+   This is a background function: Netlify returns 202 immediately and
+   runs the import in the background (up to ~15 min for the full RSR
+   catalog). You will NOT see stats in that browser response.
+3. Check progress in Netlify: Functions → rsr-import-background → Logs.
+   Look for `RSR import OK` with stats (published / hidden / outOfStock).
+   If you see `RSR import FAILED`, send that log line — the live shop
+   is NOT blanked on failure, the old catalog stays.
+4. When the log says OK, reload the shop. It should now show real RSR
+   products (thousands, MAP prices, main-inventory stock) instead of
+   the 8 samples. Product images will STILL be placeholders at this
+   point — that is the separate Wasabi/Bunny image-sync step (section 4),
+   not a failed import.
 
 ## 4. Bunny and Wasabi — when do they get updated? NOT now
 

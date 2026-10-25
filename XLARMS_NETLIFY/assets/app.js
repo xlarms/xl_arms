@@ -47,6 +47,12 @@ function score(p, toks, raw) {
   return matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
 async function loadProducts() {
+  // Live catalog first: /api/products reads Netlify Blobs (written by the
+  // RSR importer). Fall back to the static sample file before the first import.
+  try {
+    const res = await fetch('/api/products');
+    if (res.ok) { const data = await res.json(); if (data && Array.isArray(data.products) && data.products.length) return data.products; }
+  } catch (e) { /* fall through to sample file */ }
   const res = await fetch('data/products.json');
   const data = await res.json();
   return data.products;

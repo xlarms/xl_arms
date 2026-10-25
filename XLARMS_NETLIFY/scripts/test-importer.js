@@ -1,7 +1,7 @@
 // Local test for netlify/functions/rsr-import.js — uses ONLY Jonathan's sample rows
 // sent in chat 2026-10-25. Run: node scripts/test-importer.js  (exit 1 on any failure)
 const assert = require('assert');
-const { buildCatalog, isDropShipBlocked, imageShard } = require('../netlify/functions/rsr-import');
+const { buildCatalog, isDropShipBlocked, imageShard, toStorefrontCatalog } = require('../netlify/functions/rsr-import');
 
 const inventory = [
   '17912WH-1-SBL-R;816161020234;1791 2 WAY IWB STEALTH BLK RH SIZE 1;14;1791;50.99;30.59;6;7;2 Way Holster;1791 Gunleather;2WH-1-SBL-R;;1791 Gunleather 2 Way Holster, Inside Waistband Holster, Size 1, Right Hand, Stealth Black, Leather 2WH-1-SBL-R;17912WH-1-SBL-R_1.jpg;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;20210420;48.99;;7.50;6.50;2.00;Y;;',
@@ -64,4 +64,16 @@ assert.strictEqual(isDropShipBlocked(restr.restrictions, 'AL', '', ''), true, 'L
 const unknown = buildCatalog({ inventory: 'AAC-15-308-BK;000000000000;TEST;5;TEST;100;60;10;5;Test;Test;T-1;;Test;AAC-15-308-BK_1.jpg;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;20200101;90;;1;1;1;;', restrictions: 'AAC-15-308-BK;"ALL";MA;S;O' }).products[0];
 assert.strictEqual(isDropShipBlocked(unknown.restrictions, 'MA', '', ''), true, 'unknown code O blocks by default');
 
-console.log('PASS — importer tests:', JSON.stringify(out.stats), '| product:', p.sku, p.price, 'stock', p.stock, '| dealers:', out.dealers.length);
+// Storefront mapping: the shop (app.js) must be able to render the imported product.
+const storefront = toStorefrontCatalog(out);
+assert.strictEqual(storefront.products.length, 1, 'storefront product count');
+const sp = storefront.products[0];
+assert.strictEqual(sp.sku, '17912WH-1-SBL-R');
+assert.strictEqual(sp.category, 'Holsters & Pouches');
+assert.strictEqual(sp.price, 48.99);
+assert.strictEqual(sp.stock_qty, 7);
+assert.strictEqual(sp.is_firearm, false, 'holster is not a firearm');
+assert.strictEqual(sp.images[0], 'images/placeholder.svg', 'placeholder until Wasabi/Bunny image sync');
+assert.ok(sp.description.length > 0, 'storefront description present');
+
+console.log('PASS — importer tests:', JSON.stringify(out.stats), '| product:', p.sku, p.price, 'stock', p.stock, '| dealers:', out.dealers.length, '| storefront:', sp.category, sp.stock_qty);
