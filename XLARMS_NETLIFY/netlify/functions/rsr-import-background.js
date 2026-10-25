@@ -88,8 +88,15 @@ async function downloadAll() {
   return files;
 }
 
-exports.handler = async () => {
+exports.handler = async (event) => {
   try {
+    // Netlify Blobs in Lambda-compatibility mode (exports.handler): the
+    // Blobs credentials Netlify provides are NOT loaded automatically.
+    // connectLambda(event) must run before getStore(), otherwise getStore()
+    // throws 'The environment has not been configured to use Netlify Blobs'
+    // — exactly the 2026-10-25 19:20 failure. Do NOT pass siteID/token to
+    // getStore() in code running on Netlify; that replaces the provided creds.
+    try { require('@netlify/blobs').connectLambda(event); } catch (e) { console.warn('connectLambda skipped:', e.message); }
     const files = await downloadAll();
     const catalog = buildCatalog(files);
     // Validation gate: never publish a collapsed catalog. A sudden 90%+ drop in
@@ -112,9 +119,11 @@ exports.handler = async () => {
     const store = blobs.getStore('xl-arms-catalog');
     const storefront = toStorefrontCatalog(catalog);
     await store.set('products.json', JSON.stringify(storefront));
-    // Keep the full internal catalog (restrictions, messages, search index)
-    // alongside it for checkout / admin use, without bloating the shop payload.
-    await store.set('catalog-full.json', JSON.stringify(catalog));
+    // NOTE: the full internal catalog (restrictions, messages, search index)
+    // is intentionally NOT written as a second giant Blob here — the first
+    // successful run already used 705 MB holding both copies in memory.
+    // Restrictions/messages will be stored separately (per-SKU or as a
+    // compact file) when checkout is built; the shop only needs products.json.
     console.log('RSR import OK', JSON.stringify(catalog.stats), 'errors:', catalog.errors.slice(0, 20));
     return { statusCode: 202, body: JSON.stringify({ ok: true, stats: catalog.stats, note: 'Background import started — check Functions log for RSR import OK, then reload the shop.' }) };
   } catch (e) {

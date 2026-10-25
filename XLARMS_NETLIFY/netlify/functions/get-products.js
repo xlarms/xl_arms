@@ -5,10 +5,11 @@
 // Never query RSR FTP live from this function.
 const fs = require('fs');
 const path = require('path');
-exports.handler = async () => {
+exports.handler = async (event) => {
   try {
     try {
-      const { getStore } = require('@netlify/blobs');
+      const { getStore, connectLambda } = require('@netlify/blobs');
+      try { connectLambda(event); } catch (e) { /* non-Lambda context */ }
       const store = getStore('xl-arms-catalog');
       const live = await store.get('products.json', { type: 'json' });
       if (live && Array.isArray(live.products) && live.products.length > 0) {
