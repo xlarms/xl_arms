@@ -114,8 +114,15 @@ first, falling back to the sample file only before the first import.
 `@netlify/blobs` and `basic-ftp` are both in `package.json`, so
 `npm install` on deploy installs them.
 1. In Netlify: Project configuration → Environment variables → add
-   `RSR_FTP_HOST`, `RSR_FTP_USER`, `RSR_FTP_PASS`, `RSR_FTP_DIR=ftpdownloads`
-   (scope: All scopes). Save.
+   `RSR_FTP_HOST`, `RSR_FTP_USER`, `RSR_FTP_PASS`, `RSR_FTP_DIR=ftpdownloads`,
+   `RSR_FTP_PORT=2222` (scope: All scopes, except PASS/USER which are secret).
+   Save. PORT IS CRITICAL: RSR FTP is on port 2222, not the FTP default 21.
+   Earlier code did not set a port, so it tried :21 and timed out
+   (2026-10-25 ETIMEDOUT). The importer now defaults to 2222 even without
+   the env var, but setting it explicitly is recommended.
+   TLS IS CRITICAL TOO: RSR requires EXPLICIT TLS (FTPS) — confirmed
+   2026-10-25 from FileZilla. The importer now uses secure:true
+   (explicit FTPS). Plain FTP (secure:false) will be dropped.
 2. Trigger the importer by opening in your browser:
    `https://xl-arms.netlify.app/.netlify/functions/rsr-import-background`
    This is a background function: Netlify returns 202 immediately and

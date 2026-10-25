@@ -49,13 +49,22 @@ async function downloadAll() {
     throw new Error('FTP client not installed: run `npm i basic-ftp` and set RSR_FTP_HOST/USER/PASS in Netlify env vars.');
   }
   const { RSR_FTP_HOST, RSR_FTP_USER, RSR_FTP_PASS, RSR_FTP_DIR = 'ftpdownloads' } = process.env;
+  // RSR FTP port is 2222, NOT the FTP default 21. Earlier runs connected to
+  // :21 (because no port was set) and timed out — that was the 2026-10-25
+  // ETIMEDOUT failure, not a password or IP problem. Default is 2222 here,
+  // with RSR_FTP_PORT as an override in Netlify if RSR ever changes it.
+  const RSR_FTP_PORT = parseInt(process.env.RSR_FTP_PORT || '2222', 10);
   if (!RSR_FTP_HOST || !RSR_FTP_USER || !RSR_FTP_PASS) {
     throw new Error('RSR FTP env vars missing (RSR_FTP_HOST/USER/PASS). Set them in the Netlify dashboard, never in code.');
   }
   const client = new ftp.Client();
   const files = {};
   try {
-    await client.access({ host: RSR_FTP_HOST, user: RSR_FTP_USER, password: RSR_FTP_PASS, secure: false });
+    // RSR requires EXPLICIT TLS (FTPS) — confirmed by Jonathan 2026-10-25
+    // from FileZilla. secure:false (plain FTP) will be dropped. secure:true
+    // in basic-ftp is explicit FTPS (AUTH TLS), which matches FileZilla's
+    // 'Require explicit FTP over TLS' setting.
+    await client.access({ host: RSR_FTP_HOST, user: RSR_FTP_USER, password: RSR_FTP_PASS, port: RSR_FTP_PORT, secure: true });
     await client.cd(RSR_FTP_DIR);
     for (const [key, name] of Object.entries(DATA_FILES)) {
       try {
