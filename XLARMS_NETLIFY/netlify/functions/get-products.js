@@ -11,6 +11,31 @@
 const fs = require('fs');
 const path = require('path');
 
+// CLEAN ON READ (2026-10-25): the catalog already in Blobs was built before
+// the importer cleaning above, so it still contains polluted values:
+//   category "Dept ACC741C_1.jpg" (image filename, not a department)
+//   caliber "12 Gauge 2.75;;#4;;Federal;..." (a whole shell attribute string)
+// Cleaning here makes the live shop correct on redeploy alone, with no
+// re-import needed. The next import will produce clean values at source too.
+//   category: "Dept" / "Dept <anything>" -> "Other"
+//   caliber: first ';' segment only; gauges collapse to base gauge.
+function cleanCategory(cat) {
+  if (!cat) return '';
+  if (cat === 'Dept' || String(cat).startsWith('Dept ')) return 'Other';
+  return cat;
+}
+function cleanCaliber(cal) {
+  if (!cal) return '';
+  const first = String(cal).split(';')[0].trim();
+  const gauge = first.match(/^(\d+)\s*(?:gauge|ga\.?)\b/i);
+  if (gauge) return `${gauge[1]} Gauge`;
+  if (/^410\s*bore/i.test(first)) return '410 Bore';
+  return first;
+}
+function cleanProduct(p) {
+  return { ...p, category: cleanCategory(p.category), caliber: cleanCaliber(p.caliber) };
+}
+
 const SYNONYMS = { g19: ['glock', '19'], g17: ['glock', '17'], '9x19': ['9mm'], 9: ['9mm'] };
 function canonicalCaliber(q) {
   return q
@@ -55,7 +80,7 @@ async function loadCatalog(event) {
 exports.handler = async (event) => {
   try {
     const q = event.queryStringParameters || {};
-    const all = await loadCatalog(event);
+    const all = (await loadCatalog(event)).map(cleanProduct);
     // Single-product lookup for product.html — returns at most 1 product.
     if (q.sku) {
       const found = all.find((p) => String(p.sku).toLowerCase() === String(q.sku).toLowerCase());

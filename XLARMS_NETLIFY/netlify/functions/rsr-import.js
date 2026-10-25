@@ -79,13 +79,29 @@ function listOf(...vals) {
 }
 // Caliber canonicalisation for search: 9 mm / 9x19 / 9MM -> "9mm", etc.
 // Never silently substitute one caliber for another — this only normalises spelling.
+// CLEAN 2026-10-25: live RSR shotgun-shell caliber fields arrive as a whole
+// semicolon-joined attribute string, e.g.
+//   "12 Gauge 2.75;;#4;;Federal;SH1294B;;Shorty Shotshell;;;;Buckshot;10;100;;Shot Shell Ammunition..."
+// Using that as one caliber value pollutes the Caliber facet with 200-char
+// entries. cleanCaliberDisplay() takes only the first ';' segment and, for
+// gauges, collapses shell length ("12 Gauge 2.75" -> "12 Gauge", "410 Bore 2.5"
+// -> "410 Bore") — shell length is not a caliber, and shoppers filter by gauge.
+function cleanCaliberDisplay(raw) {
+  if (!raw) return '';
+  const first = String(raw).split(';')[0].trim();
+  const gauge = first.match(/^(\d+)\s*(?:gauge|ga\.?)\b/i);
+  if (gauge) return `${gauge[1]} Gauge`;
+  if (/^410\s*bore/i.test(first)) return '410 Bore';
+  return first;
+}
 function canonicalCaliber(raw) {
   if (!raw) return null;
-  let s = String(raw).toLowerCase().replace(/\s+/g, '').replace(/×/g, 'x');
+  const cleaned = cleanCaliberDisplay(raw);
+  let s = cleaned.toLowerCase().replace(/\s+/g, '').replace(/×/g, 'x');
   const map = { '9x19': '9mm', '9x19mm': '9mm', '9mmluger': '9mm', '9mmparabellum': '9mm',
     '556x45': '5.56', '556nato': '5.56', '223rem': '.223', '762x51': '7.62x51',
     '762x39': '7.62x39', '12gauge': '12ga', '12ga.': '12ga', '20gauge': '20ga' };
-  return map[s] || String(raw).trim();
+  return map[s] || cleaned;
 }
 function imageShard(rsr) {
   const c = String(rsr || '').charAt(0);
@@ -119,7 +135,11 @@ function parseInventory(text) {
     }
     out.set(rsr, {
       rsr, upc: clean(f[1]), title: clean(f[2]),
-      department: intVal(f[3]), departmentName: DEPARTMENTS[intVal(f[3])] || `Dept ${clean(f[3])}`,
+      // CLEAN 2026-10-25: the old fallback `Dept ${f[3]}` created fake
+      // categories like "Dept ACC741C_1.jpg" (an image filename, not a
+      // department) whenever a row's department field wasn't a 1–43 number.
+      // Unknown departments now collapse to a single clean "Other" bucket.
+      department: intVal(f[3]), departmentName: DEPARTMENTS[intVal(f[3])] || 'Other',
       manufacturerId: clean(f[4]), msrp: num(f[5]), dealerPrice: num(f[6]),
       weightOz: num(f[7]), stock: intVal(f[8]), model: clean(f[9]),
       brand: clean(f[10]), mpn: clean(f[11]), statusFlag: clean(f[12]),
@@ -150,7 +170,9 @@ function parseAttributes(text) {
       firingCasing: get(15), finish: get(16), fit: listOf(get(17), get(18)),
       feetPerSecond: get(19), frame: get(20),
       caliber: listOf(get(21), get(22)).map(canonicalCaliber).filter(Boolean),
-      caliberRaw: listOf(get(21), get(22)),
+      // caliberRaw is the DISPLAY value (facets + product page) — clean it
+      // here so a semicolon-joined shell string never reaches the shop.
+      caliberRaw: listOf(get(21), get(22)).map(cleanCaliberDisplay).filter(Boolean),
       grainWeight: get(23), grips: get(24), hand: get(25), manufacturer: get(26),
       manufacturerPart: get(27), manufacturerWeight: get(28), moa: get(29),
       modelAttr: listOf(get(30), get(31)), newStock: get(32), nsn: get(33),
@@ -384,7 +406,7 @@ function toStorefrontCatalog(catalog) {
 }
 
 module.exports = {
-  DEPARTMENTS, STATE_CODES, splitLine, canonicalCaliber, imageShard, imagePaths,
+  DEPARTMENTS, STATE_CODES, splitLine, canonicalCaliber, cleanCaliberDisplay, imageShard, imagePaths,
   parseInventory, parseAttributes, parseXref, parseRestrictions, isDropShipBlocked,
   parseMessages, parseRetailMap, parseSellDescriptions, parseFFL, parseDeleted, buildCatalog,
   toStorefrontProduct, toStorefrontCatalog, FIREARM_DEPARTMENTS,
