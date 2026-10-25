@@ -48,6 +48,19 @@ async function downloadAll() {
   try { ftp = require('basic-ftp'); } catch {
     throw new Error('FTP client not installed: run `npm i basic-ftp` and set RSR_FTP_HOST/USER/PASS in Netlify env vars.');
   }
+  // FIX 2026-10-25: basic-ftp's downloadTo() needs a real Writable stream
+  // (or a file path) as its destination — not a plain {write, end} object.
+  // The old object caused 'destination.once is not a function' for every
+  // file, so every download was skipped and the inventory came back empty.
+  const { Writable } = require('stream');
+  async function downloadOne(client, name) {
+    const chunks = [];
+    const writable = new Writable({
+      write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); },
+    });
+    await client.downloadTo(writable, name);
+    return Buffer.concat(chunks).toString('utf8');
+  }
   const { RSR_FTP_HOST, RSR_FTP_USER, RSR_FTP_PASS, RSR_FTP_DIR = 'ftpdownloads' } = process.env;
   // RSR FTP port is 2222, NOT the FTP default 21. Earlier runs connected to
   // :21 (because no port was set) and timed out — that was the 2026-10-25
@@ -68,9 +81,7 @@ async function downloadAll() {
     await client.cd(RSR_FTP_DIR);
     for (const [key, name] of Object.entries(DATA_FILES)) {
       try {
-        const chunks = [];
-        await client.downloadTo({ write: (c) => chunks.push(c), end: () => {} }, name);
-        files[key] = Buffer.concat(chunks).toString('utf8');
+        files[key] = await downloadOne(client, name);
       } catch (e) { files[key] = ''; console.warn(`RSR file missing/unreadable, continuing without it: ${name} — ${e.message}`); }
     }
   } finally { client.close(); }
