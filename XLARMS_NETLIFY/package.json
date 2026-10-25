@@ -1,0 +1,1 @@
+{"dependencies":{"basic-ftp":"^5.0.0"},"description":"Fresh XL Arms site on Netlify — RSR importer, search, and storefront. No credentials in this file.","name":"xl-arms-new-site","private":true,"scripts":{"test:importer":"node scripts/test-importer.js"},"version":"0.1.0"}
