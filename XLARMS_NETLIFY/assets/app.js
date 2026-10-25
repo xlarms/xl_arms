@@ -1,67 +1,41 @@
-// XL Arms search — starter implementation.
-// Rules (see plan): exact SKU/UPC first, then brand+model, then all-terms narrowing.
-// Caliber is canonicalised: 9 mm / 9x19 -> 9mm, .223 / 223 Rem -> 223, 5.56 -> 5.56, 12 gauge -> 12ga.
-// Synonyms are expanded for the QUERY, never silently substituted across calibers.
-const SYNONYMS = {
-  'g19': ['glock', '19'],
-  'g17': ['glock', '17'],
-  '9x19': ['9mm'],
-  '9': ['9mm'],
-};
+// XL Arms shop — SERVER-DRIVEN search (paginated).
+// Why server-driven: the live catalog is 26,298 products / ~6.29 MB.
+// Netlify Functions crash over ~6 MB per response, so the shop must NEVER
+// fetch the whole catalog. /api/products (get-products.js) filters/scores
+// server-side and returns only one page (48) + total + facets.
+// Rules: exact SKU/UPC first, then brand+model, then all-terms narrowing.
+// Caliber canonicalised: 9 mm / 9x19 -> 9mm, .223 / 223 Rem -> 223, 5.56 -> 5.56, 12 gauge -> 12ga.
+// Synonyms expand the QUERY, never silently substitute across calibers.
+const SYNONYMS = { g19: ['glock', '19'], g17: ['glock', '17'], '9x19': ['9mm'], 9: ['9mm'] };
 function canonicalCaliber(q) {
-  return q
-    .replace(/\b9\s*mm\b/g, '9mm')
-    .replace(/\b9\s*x\s*19\b/g, '9mm')
-    .replace(/\.223\s*rem(?:ington)?\b/g, '223')
-    .replace(/\b223\s*rem(?:ington)?\b/g, '223')
-    .replace(/\b12\s*ga(?:uge)?\b/g, '12ga')
-    .replace(/\b5\.56\s*nato\b/g, '5.56');
+  return q.replace(/\b9\s*mm\b/g, '9mm').replace(/\b9\s*x\s*19\b/g, '9mm')
+    .replace(/\.223\s*rem(?:ington)?\b/g, '223').replace(/\b223\s*rem(?:ington)?\b/g, '223')
+    .replace(/\b12\s*ga(?:uge)?\b/g, '12ga').replace(/\b5\.56\s*nato\b/g, '5.56');
 }
 function tokens(q) {
-  let t = canonicalCaliber(q.toLowerCase().replace(/[^a-z0-9.\s]/g, ' '));
-  let parts = t.split(/\s+/).filter(Boolean);
-  let out = [];
-  parts.forEach(p => {
-    // Synonym replaces the original token (G19 -> glock + 19), so exact matching works.
-    if (SYNONYMS[p]) out.push(...SYNONYMS[p]);
-    else out.push(p);
-  });
+  const parts = canonicalCaliber(String(q || '').toLowerCase().replace(/[^a-z0-9.\s]/g, ' ')).split(/\s+/).filter(Boolean);
+  const out = [];
+  for (const p of parts) { if (SYNONYMS[p]) out.push(...SYNONYMS[p]); else out.push(p); }
   return [...new Set(out)];
 }
 function score(p, toks, raw) {
   const hay = [p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical, p.sku, p.upc].join(' ').toLowerCase();
-  if (raw && (p.sku.toLowerCase() === raw || p.upc === raw)) return 1000;
-  if (toks.every(t => hay.includes(t))) {
+  if (raw && (String(p.sku).toLowerCase() === raw || String(p.upc) === raw)) return 1000;
+  if (toks.length && toks.every((t) => hay.includes(t))) {
     let s = 500;
     if (hay.includes((p.brand + ' ' + p.model).toLowerCase())) s += 100;
-    // Prefer the product whose model itself starts with a query token:
-    // "Glock 17" -> the 17 Gen5 pistol, not the G17 magazine.
     const modelFirst = (p.model || '').split(/\s+/)[0].toLowerCase();
     if (modelFirst && toks.includes(modelFirst)) s += 80;
     if (p.stock_qty > 0) s += 50;
     return s;
   }
-  // Partial: count matched tokens, but require at least one strong token (brand/model/caliber/sku)
-  let matched = toks.filter(t => hay.includes(t)).length;
-  if (matched === 0) return 0;
-  return matched * 10 + (p.stock_qty > 0 ? 5 : 0);
-}
-async function loadProducts() {
-  // Live catalog first: /api/products reads Netlify Blobs (written by the
-  // RSR importer). Fall back to the static sample file before the first import.
-  try {
-    const res = await fetch('/api/products');
-    if (res.ok) { const data = await res.json(); if (data && Array.isArray(data.products) && data.products.length) return data.products; }
-  } catch (e) { /* fall through to sample file */ }
-  const res = await fetch('data/products.json');
-  const data = await res.json();
-  return data.products;
+  if (!toks.length) return p.stock_qty > 0 ? 50 : 0;
+  const matched = toks.filter((t) => hay.includes(t)).length;
+  return matched === 0 ? 0 : matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
 function money(n) { return '$' + Number(n).toFixed(2); }
 function card(p) {
-  const stock = p.stock_qty > 0
-    ? `<span class="instock">In stock (${p.stock_qty})</span>`
-    : `<span class="outstock">Out of stock</span>`;
+  const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
   return `<article class="card">
     <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}"></a>
@@ -74,6 +48,7 @@ function card(p) {
 async function initShop() {
   const listEl = document.getElementById('results');
   const countEl = document.getElementById('count');
+  const pageEl = document.getElementById('pagination');
   const qEl = document.getElementById('q');
   const catEl = document.getElementById('category');
   const brandEl = document.getElementById('brand');
@@ -81,53 +56,97 @@ async function initShop() {
   const stockEl = document.getElementById('instock');
   const sortEl = document.getElementById('sort');
   if (!listEl) return;
-  const products = await loadProducts();
-  const cats = [...new Set(products.map(p => p.category))].sort();
-  const brands = [...new Set(products.map(p => p.brand))].sort();
-  const cals = [...new Set(products.map(p => p.caliber).filter(Boolean))].sort();
-  cats.forEach(c => catEl.insertAdjacentHTML('beforeend', `<option>${c}</option>`));
-  brands.forEach(b => brandEl.insertAdjacentHTML('beforeend', `<option>${b}</option>`));
-  cals.forEach(c => calEl.insertAdjacentHTML('beforeend', `<option>${c}</option>`));
-  // Autocomplete: simple suggestion list under search
-  const sugg = document.getElementById('suggestions');
-  function render() {
+  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null;
+  function setOptions(el, values, label) {
+    const cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + values.map((v) => `<option>${v}</option>`).join('');
+    if (values.includes(cur)) el.value = cur;
+  }
+  async function render() {
+    const params = new URLSearchParams({
+      q: qEl.value || '', category: catEl.value || '', brand: brandEl.value || '',
+      caliber: calEl.value || '', inStock: stockEl.checked ? '1' : '',
+      sort: sortEl.value === 'price-asc' ? 'price-asc' : sortEl.value === 'price-desc' ? 'price-desc' : '',
+      page: String(page), limit: '48',
+    });
+    let data = null;
+    try {
+      const res = await fetch('/api/products?' + params.toString());
+      if (res.ok) data = await res.json();
+    } catch (e) { /* fall through to sample fallback */ }
+    if (data && typeof data.total === 'number') {
+      if (!facetsLoaded && data.facets) {
+        setOptions(catEl, data.facets.categories, 'All categories');
+        setOptions(brandEl, data.facets.brands, 'All brands');
+        setOptions(calEl, data.facets.calibers, 'All calibers');
+        facetsLoaded = true;
+      }
+      totalPages = Math.max(1, Math.ceil(data.total / (data.pageSize || 48)));
+      countEl.textContent = data.total + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${data.page} of ${totalPages}` : '');
+      listEl.innerHTML = data.products.length
+        ? data.products.map(card).join('')
+        : `<div class="banner"><strong>No exact match.</strong> Try a brand + model (e.g. Glock 19), a SKU, or a caliber.</div>`;
+      const sugg = document.getElementById('suggestions');
+      if (sugg) {
+        const raw = (qEl.value || '').trim();
+        sugg.innerHTML = raw && data.products.length
+          ? `<div class="filters" style="margin-top:8px"><strong>Suggestions</strong>${data.products.slice(0, 5).map((p) => `<div><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title} — ${money(p.price)}</a></div>`).join('')}</div>` : '';
+      }
+      if (pageEl) {
+        pageEl.innerHTML = totalPages > 1
+          ? `<button id="prevPage" ${page <= 1 ? 'disabled' : ''}>← Previous</button> <span style="margin:0 8px">Page ${page} of ${totalPages}</span> <button id="nextPage" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`
+          : '';
+        const prev = document.getElementById('prevPage');
+        const next = document.getElementById('nextPage');
+        if (prev) prev.onclick = () => { if (page > 1) { page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+        if (next) next.onclick = () => { if (page < totalPages) { page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+      }
+      return;
+    }
+    // Fallback: /api/products failed (e.g. old deploy) — use the static sample
+    // file, filtered locally, paginated the same way so it can never render 26k cards.
+    if (!fallbackProducts) {
+      try { const r = await fetch('data/products.json'); fallbackProducts = (await r.json()).products || []; }
+      catch (e) { fallbackProducts = []; }
+    }
     const raw = (qEl.value || '').trim().toLowerCase();
     const toks = raw ? tokens(raw) : [];
-    let items = products.filter(p => {
+    let items = fallbackProducts.filter((p) => {
       if (catEl.value && p.category !== catEl.value) return false;
       if (brandEl.value && p.brand !== brandEl.value) return false;
       if (calEl.value && p.caliber !== calEl.value) return false;
       if (stockEl.checked && p.stock_qty <= 0) return false;
       return true;
     });
-    if (raw) {
-      items = items.map(p => ({ p, s: score(p, toks, raw) }))
-        .filter(x => x.s > 0).sort((a, b) => b.s - a.s).map(x => x.p);
-    } else if (sortEl.value === 'price-asc') items.sort((a, b) => a.price - b.price);
+    if (raw) items = items.map((p) => ({ p, s: score(p, toks, raw) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
+    else if (sortEl.value === 'price-asc') items.sort((a, b) => a.price - b.price);
     else if (sortEl.value === 'price-desc') items.sort((a, b) => b.price - a.price);
     else items.sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
+    totalPages = Math.max(1, Math.ceil(items.length / 48));
     countEl.textContent = items.length + ' product' + (items.length === 1 ? '' : 's');
-    if (!items.length) {
-      listEl.innerHTML = `<div class="banner"><strong>No exact match.</strong> Try a brand + model (e.g. Glock 19), a SKU, or a caliber. In the live store, zero-result searches are logged so we can add the missing synonym or product.</div>`;
-    } else {
-      listEl.innerHTML = items.map(card).join('');
-    }
-    if (sugg) {
-      if (!raw) { sugg.innerHTML = ''; return; }
-      const top = items.slice(0, 5).map(p => `<div><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title} — ${money(p.price)}</a></div>`).join('');
-      sugg.innerHTML = top ? `<div class="filters" style="margin-top:8px"><strong>Suggestions</strong>${top}</div>` : '';
-    }
+    listEl.innerHTML = items.slice((page - 1) * 48, page * 48).map(card).join('') || `<div class="banner"><strong>No exact match.</strong></div>`;
+    if (pageEl) pageEl.innerHTML = '';
   }
-  [qEl, catEl, brandEl, calEl, stockEl, sortEl].forEach(el => el.addEventListener('input', render));
-  document.getElementById('searchForm').addEventListener('submit', e => { e.preventDefault(); render(); });
+  function resetAndRender() { page = 1; render(); }
+  [qEl, catEl, brandEl, calEl, stockEl, sortEl].forEach((el) => el.addEventListener('input', resetAndRender));
+  document.getElementById('searchForm').addEventListener('submit', (e) => { e.preventDefault(); resetAndRender(); });
   render();
 }
 async function initProduct() {
   const el = document.getElementById('product');
   if (!el) return;
   const sku = new URLSearchParams(location.search).get('sku');
-  const products = await loadProducts();
-  const p = products.find(x => x.sku === sku) || products[0];
+  let p = null;
+  try {
+    const res = await fetch('/api/products?sku=' + encodeURIComponent(sku || ''));
+    if (res.ok) { const data = await res.json(); p = (data.products || [])[0] || null; }
+  } catch (e) { /* fallback below */ }
+  if (!p) {
+    const res = await fetch('data/products.json');
+    const data = await res.json();
+    p = (data.products || []).find((x) => x.sku === sku) || data.products[0];
+  }
+  if (!p) { el.innerHTML = '<p>Product not found.</p>'; return; }
   const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm
     ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
@@ -149,7 +168,7 @@ async function initProduct() {
       <tr><th>SKU / RSR #</th><td>${p.sku}</td></tr>
       <tr><th>UPC</th><td>${p.upc}</td></tr>
     </table>
-    <p>${p.description}</p>
-    <p><em>Sample data — real RSR data, images, and checkout replace this page before launch.</em></p>`;
+    <p>${p.description || ''}</p>
+    ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
 }
 document.addEventListener('DOMContentLoaded', () => { initShop(); initProduct(); });
