@@ -60,6 +60,9 @@ async function addToCart(sku) {
     try { const r = await fetch('data/products.json'); const d = await r.json(); p = (d.products || []).find((x) => x.sku === sku) || null; } catch (e) {}
   }
   if (!p) return;
+  // Call-only for unpriced items (Jonathan, 2026-10-26): a $0 feed price must
+  // never reach the cart — the buttons are swapped too, this is the backstop.
+  if (!(p.price > 0)) { alert('This item is priced on request — please call (678) 691-6375 for a price.'); return; }
   const cart = getCart();
   const line = cart.find((i) => i.sku === p.sku);
   if (line) line.qty += 1; else cart.push({ sku: p.sku, title: p.title, price: p.price, image: (p.images || [])[0] || 'images/placeholder.svg', is_firearm: !!p.is_firearm, qty: 1 });
@@ -126,7 +129,7 @@ function card(p) {
     <div class="meta">${p.brand} · ${p.category}${p.caliber ? ' · ' + p.caliber : ''}</div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
     <div>${stock}</div>${ffl}
-    <button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>
+    ${p.price > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
   </article>`;
 }
 async function initShop() {
@@ -322,7 +325,7 @@ async function initProduct() {
     <h2>${p.title}</h2>
     <img src="${p.images[0]}" alt="${p.title}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px">
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
-    <p><button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a></p>
+    <p>${p.price > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
       <tr><th>Model</th><td>${p.model}</td></tr>
