@@ -70,6 +70,17 @@
     <p id="ageDenied" style="display:none;color:#ff8a80">Sorry — you must be 18 or older to shop here.</p>
   </div>
 </div>
+<!-- Back-in-stock signup form definition for Netlify Forms. The notify forms
+     on cards/product pages are rendered by JavaScript, which Netlify cannot
+     see at deploy time, so this hidden static form registers the
+     "back-in-stock" form. The JS submits to it by name; submissions land in
+     Netlify Dashboard -> Forms. The bot-field input is a spam honeypot. -->
+<form name="back-in-stock" data-netlify="true" data-netlify-honeypot="bot-field" hidden>
+  <input type="email" name="email">
+  <input type="text" name="sku">
+  <input type="text" name="title">
+  <input type="text" name="bot-field">
+</form>
 <script src="assets/app.js"></script>
 </body>
 </html>

@@ -63,12 +63,48 @@ async function addToCart(sku) {
   // Call-only for unpriced items (Jonathan, 2026-10-26): a $0 feed price must
   // never reach the cart — the buttons are swapped too, this is the backstop.
   if (!(p.price > 0)) { alert('This item is priced on request — please call (678) 691-6375 for a price.'); return; }
+  // Out-of-stock items are never added to the cart either (Jonathan,
+  // 2026-10-26): shoppers use Notify Me When In Stock instead.
+  if (!(p.stock_qty > 0)) { alert('This item is out of stock — use Notify Me When In Stock and we will email you when it returns.'); return; }
   const cart = getCart();
   const line = cart.find((i) => i.sku === p.sku);
   if (line) line.qty += 1; else cart.push({ sku: p.sku, title: p.title, price: p.price, image: (p.images || [])[0] || 'images/placeholder.svg', is_firearm: !!p.is_firearm, qty: 1 });
   saveCart(cart);
   updateCartBadge();
   alert('Added to cart: ' + p.title);
+}
+// Back-in-stock request (Jonathan, 2026-10-26): out-of-stock items show a
+// Notify Me form instead of Add to Cart. Primary capture is Netlify Forms:
+// the shopper's email + SKU are POSTed to the "back-in-stock" form (defined
+// as a hidden static form in every page that renders notify forms, because
+// Netlify only registers forms it finds in static HTML at deploy time).
+// Submissions land in Netlify Dashboard -> Forms, no mail app needed. If that
+// POST fails (e.g. previewing the site locally, or Forms not yet active),
+// fall back to the mailto path so the signup is never silently lost.
+async function notifyStock(e, sku) {
+  if (e) e.preventDefault();
+  const form = e && e.target ? e.target : null;
+  const input = form ? form.querySelector('input[type=email]') : null;
+  const email = input ? input.value.trim() : '';
+  let title = '';
+  try {
+    const card = form ? form.closest('article') : null;
+    const h3 = card ? card.querySelector('h3') : null;
+    const h2 = document.querySelector('#product h2');
+    title = (h3 ? h3.innerText : '') || (h2 ? h2.innerText : '') || '';
+  } catch (err) {}
+  try {
+    const body = new URLSearchParams({ 'form-name': 'back-in-stock', email, sku, title });
+    const res = await fetch(window.location.pathname, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+    if (!res.ok) throw new Error('Form submission failed: ' + res.status);
+    if (form) form.outerHTML = '<p class="notifyok">You are on the list — we will email you when this item is back in stock.</p>';
+    return false;
+  } catch (err) {
+    const subject = encodeURIComponent('Back-in-stock request: ' + sku);
+    const mailBody = encodeURIComponent('Please notify me when this item is back in stock.\n\nItem: ' + (title || sku) + ' (' + sku + ')\nMy email: ' + email);
+    window.location.href = 'mailto:info@xlarms.us?subject=' + subject + '&body=' + mailBody;
+    return false;
+  }
 }
 function clearCart() { saveCart([]); initCartPage(); }
 function cartQty(sku, d) {
@@ -129,7 +165,7 @@ function card(p) {
     <div class="meta">${p.brand} · ${p.category}${p.caliber ? ' · ' + p.caliber : ''}</div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
     <div>${stock}</div>${ffl}
-    ${p.price > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
+    ${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${sku}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
   </article>`;
 }
 async function initShop() {
@@ -325,7 +361,7 @@ async function initProduct() {
     <h2>${p.title}</h2>
     <img src="${p.images[0]}" alt="${p.title}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px">
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
-    <p>${p.price > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
+    <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
       <tr><th>Model</th><td>${p.model}</td></tr>
