@@ -24,6 +24,11 @@
 //      purge its Bunny prefix (<host>/<prefix>/<SKU>/*, and the hi prefix
 //      when hi sizes changed). Brand-new SKUs need no purge (nothing cached
 //      yet). Purge failures are logged, never fatal.
+//   Download errors are NOT "no image": a genuinely missing file (550 /
+//   not found) ends that SKU's numbering, but any other download failure
+//   is recorded as an error, and 20 in a row aborts the run (the manifest
+//   is still saved with progress so far) instead of faking thousands of
+//   no-images records.
 //
 // Modes (query params on the function URL):
 //   ?skus=SKU1,SKU2   sync exactly those SKUs (test mode; default when no
@@ -61,6 +66,16 @@ function downloadOne(client, remotePath) {
     sink.on('error', reject);
     client.downloadTo(sink, remotePath).catch(reject);
   });
+}
+
+// basic-ftp reports a genuinely missing file as a 550 (or "not found").
+// Anything else (dropped connection, permission failure, timeout) is NOT
+// "no image" — it must surface as an error, never silently become a
+// no-images record. (Lesson 2026-10-26: shard 'a' recorded 5,330 SKUs as
+// no-images with errors [] because every download failure was swallowed.)
+function isNotFoundError(e) {
+  const m = String((e && e.message) || e || '').toLowerCase();
+  return m.includes('550') || m.includes('not found') || m.includes('no such file') || m.includes('does not exist') || m.includes('enoent');
 }
 
 async function ftpConnect() {
@@ -164,6 +179,9 @@ exports.handler = async (event) => {
     manifest.hiPrefix = hiPrefix;
 
     const results = [];
+    let consecutiveDlErrors = 0;
+    let abortErr = null;
+    let sampleDlError = null;
     for (const sku of skus) {
       try {
         const shard = imageShard(sku);
@@ -174,6 +192,8 @@ exports.handler = async (event) => {
           try {
             buf = await downloadOne(ftp, remote);
           } catch (e) {
+            if (!sampleDlError) sampleDlError = String((e && e.message) || e);
+            if (!isNotFoundError(e)) throw new Error('FTP_DOWNLOAD:' + (e && e.message ? e.message : String(e)));
             break; // first missing number = no more images for this SKU
           }
           if (!buf || buf.length === 0) break;
@@ -192,6 +212,7 @@ exports.handler = async (event) => {
           try {
             buf = await downloadOne(ftp, remote);
           } catch (e) {
+            if (!isNotFoundError(e)) throw new Error('FTP_DOWNLOAD:' + (e && e.message ? e.message : String(e)));
             break; // first missing number = no more hi images for this SKU
           }
           if (!buf || buf.length === 0) break;
@@ -201,7 +222,7 @@ exports.handler = async (event) => {
           }));
           hiSizes.push(buf.length);
         }
-        if (sizes.length === 0) { results.push({ sku, status: 'no-images-on-ftp' }); continue; }
+        if (sizes.length === 0) { consecutiveDlErrors = 0; results.push({ sku, status: 'no-images-on-ftp' }); continue; }
         const prev = manifest.images[sku];
         const changed = !!prev && JSON.stringify(prev.sizes || []) !== JSON.stringify(sizes);
         const hiChanged = !!prev && (prev.hiCount || 0) > 0 && JSON.stringify(prev.hiSizes || []) !== JSON.stringify(hiSizes);
@@ -217,8 +238,19 @@ exports.handler = async (event) => {
         }
         manifest.images[sku] = { count: sizes.length, sizes, hiCount: hiSizes.length, hiSizes };
         results.push({ sku, status: 'ok', count: sizes.length, changed, purge, hiCount: hiSizes.length, hiChanged, hiPurge });
+        consecutiveDlErrors = 0;
       } catch (e) {
         results.push({ sku, status: 'error', error: e.message });
+        // 20 straight download failures means the FTP connection (or the
+        // path) is broken, not that 20 products lack photos. Stop the run
+        // instead of recording thousands of fake no-images: the manifest
+        // below still saves everything synced so far.
+        if (String(e.message || '').startsWith('FTP_DOWNLOAD:')) {
+          consecutiveDlErrors++;
+          if (consecutiveDlErrors >= 20) { abortErr = e; break; }
+        } else {
+          consecutiveDlErrors = 0;
+        }
       }
     }
 
@@ -233,7 +265,13 @@ exports.handler = async (event) => {
       errors: results.filter((r) => r.status === 'error'),
       purged: results.filter((r) => r.changed).map((r) => r.sku),
       hiPurged: results.filter((r) => r.hiChanged).map((r) => r.sku),
+      firstDownloadError: sampleDlError,
+      aborted: !!abortErr,
     }));
+    if (abortErr) {
+      console.error('Image sync ABORTED after 20 consecutive download failures:', abortErr.message);
+      return { statusCode: 202, body: JSON.stringify({ ok: false, error: 'Aborted: ' + abortErr.message }) };
+    }
     return { statusCode: 202, body: JSON.stringify({ ok: true, note: 'Background image sync started — check Functions log for Image sync OK.' }) };
   } catch (e) {
     console.error('Image sync FAILED:', e.message);
