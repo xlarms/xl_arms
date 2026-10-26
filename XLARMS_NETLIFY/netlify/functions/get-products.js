@@ -110,10 +110,39 @@ async function loadCatalog(event) {
   return JSON.parse(fs.readFileSync(file, 'utf8')).products || [];
 }
 
+// Image manifest (written by image-sync-background.js): { images: { SKU: { count } } }.
+// Best-effort — a missing manifest just means placeholders stay.
+async function loadImageManifest(event) {
+  try {
+    const { getStore, connectLambda } = require('@netlify/blobs');
+    try { connectLambda(event); } catch (e) { /* non-Lambda context */ }
+    const m = await getStore('xl-arms-catalog').get('images.json', { type: 'json' });
+    if (m && m.images && typeof m.images === 'object') return m;
+  } catch (e) { /* no manifest yet */ }
+  return null;
+}
+
 exports.handler = async (event) => {
   try {
     const q = event.queryStringParameters || {};
     const all = (await loadCatalog(event)).map(cleanProduct);
+    // Image manifest join (added 2026-10-26): SKUs the image sync has
+    // uploaded get real Bunny URLs; everything else keeps the placeholder.
+    // Never another product's photo, never a guessed URL.
+    const bunnyHost = process.env.BUNNY_HOSTNAME || '';
+    if (bunnyHost) {
+      const manifest = await loadImageManifest(event);
+      if (manifest) {
+        const prefix = process.env.IMAGE_PREFIX || manifest.prefix || 'products';
+        for (const p of all) {
+          const entry = manifest.images[p.sku];
+          if (entry && entry.count > 0) {
+            p.images = [];
+            for (let n = 1; n <= entry.count; n++) p.images.push(`https://${bunnyHost}/${prefix}/${p.sku}/${n}.jpg`);
+          }
+        }
+      }
+    }
     // Single-product lookup for product.html — returns at most 1 product.
     if (q.sku) {
       const found = all.find((p) => String(p.sku).toLowerCase() === String(q.sku).toLowerCase());
