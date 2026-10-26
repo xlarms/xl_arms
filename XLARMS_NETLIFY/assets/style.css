@@ -195,3 +195,18 @@ body.home .topbar a { color: #d8d2c4; }
 body.home .headcontact a, body.home .cartlink { color: #ffffff; }
 body.home .tile, body.home .tile h3 { color: #ffffff; }
 body.home .tile p { color: #dddddd; }
+
+/* Product gallery: thumbnails + lightbox zoom (2026-10-26) */
+.pg-main.zoomable { cursor: zoom-in; }
+.pthumbs { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.pthumbs img { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; background: #f0ede6; }
+.pthumbs img.active { border-color: #b81e24; }
+.plightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
+.plightbox.open { display: flex; }
+.plightbox img { max-width: 92vw; max-height: 88vh; border-radius: 8px; background: #111; object-fit: contain; }
+.plb-btn { position: absolute; background: rgba(255, 255, 255, 0.14); color: #fff; border: 0; border-radius: 50%; cursor: pointer; line-height: 1; }
+.plb-btn:hover { background: rgba(255, 255, 255, 0.3); }
+.plb-close { top: 16px; right: 20px; width: 44px; height: 44px; font-size: 28px; }
+.plb-prev, .plb-next { top: 50%; transform: translateY(-50%); width: 48px; height: 48px; font-size: 34px; }
+.plb-prev { left: 16px; }
+.plb-next { right: 16px; }

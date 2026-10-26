@@ -486,7 +486,15 @@ async function initProduct() {
   el.innerHTML = `
     <p><a href="index.html">← Back to shop</a></p>
     <h2>${p.title}</h2>
-    <img src="${p.images[0]}" alt="${p.title}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px">
+    <div class="pgallery">
+      <img id="pgMain" src="${(p.images || [])[0] || 'images/placeholder.svg'}" alt="${p.title}" class="pg-main${(p.images || []).length ? ' zoomable' : ''}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px" ${(p.images || []).length ? `onclick="openPgLightbox(0)" title="Click to enlarge"` : ''}>
+      ${(p.images || []).length > 1 ? `<div class="pthumbs">${(p.images || []).map((src, i) => `<img src="${src}" alt="View ${i + 1} of ${p.title}" class="pthumb${i === 0 ? ' active' : ''}" onclick="setPgImage(${i})">`).join('')}</div>` : ''}
+    </div>
+    <div id="plightbox" class="plightbox" onclick="if (event.target === this) closePgLightbox()">
+      <button class="plb-btn plb-close" onclick="closePgLightbox()" aria-label="Close">×</button>
+      ${(p.images || []).length > 1 ? `<button class="plb-btn plb-prev" onclick="pgStep(-1)" aria-label="Previous image">‹</button><button class="plb-btn plb-next" onclick="pgStep(1)" aria-label="Next image">›</button>` : ''}
+      <img id="plbImg" src="" alt="">
+    </div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
     <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
     <table class="specs">
@@ -503,5 +511,42 @@ async function initProduct() {
     </table>
     <p>${p.description || ''}</p>
     ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
+  window.__pgImgs = (p.images || []).filter(Boolean);
+  window.__pgIdx = 0;
 }
+function setPgImage(i) {
+  const imgs = window.__pgImgs || [];
+  if (!imgs[i]) return;
+  window.__pgIdx = i;
+  const main = document.getElementById('pgMain');
+  if (main) main.src = imgs[i];
+  document.querySelectorAll('.pthumb').forEach((t, j) => t.classList.toggle('active', j === i));
+  const lb = document.getElementById('plbImg');
+  if (lb) lb.src = imgs[i];
+}
+function openPgLightbox(i) {
+  const imgs = window.__pgImgs || [];
+  if (!imgs.length) return;
+  setPgImage(i || 0);
+  const box = document.getElementById('plightbox');
+  if (box) box.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closePgLightbox() {
+  const box = document.getElementById('plightbox');
+  if (box) box.classList.remove('open');
+  document.body.style.overflow = '';
+}
+function pgStep(d) {
+  const imgs = window.__pgImgs || [];
+  if (imgs.length < 2) return;
+  setPgImage((window.__pgIdx + d + imgs.length) % imgs.length);
+}
+document.addEventListener('keydown', (e) => {
+  const box = document.getElementById('plightbox');
+  if (!box || !box.classList.contains('open')) return;
+  if (e.key === 'Escape') closePgLightbox();
+  if (e.key === 'ArrowLeft') pgStep(-1);
+  if (e.key === 'ArrowRight') pgStep(1);
+});
 document.addEventListener('DOMContentLoaded', () => { initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); updateCartBadge(); });
