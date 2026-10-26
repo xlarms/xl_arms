@@ -116,3 +116,23 @@ header nav a.deals { background: #d8232a; color: #fff; padding: 4px 14px; border
   .mosaic .big { min-height: 220px; }
   .mosaic-bottom, .dealsrow { grid-template-columns: 1fr; }
 }
+
+/* Cart / Help / Contact (2026-10-25): header cart icon, help cards,
+   trust band, payment badges, cart page rows. */
+.cartlink { color: #fff; text-decoration: none; font-weight: 700; white-space: nowrap; }
+.cartcount { background: #d8232a; color: #fff; border-radius: 20px; padding: 2px 9px; font-size: 13px; margin-left: 4px; }
+.btn-cart { width: 100%; margin-top: 10px; }
+.helpgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 14px 0 24px; }
+.helpcard { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 18px; color: #e8e8e8; text-decoration: none; }
+.helpcard h3 { margin: 0 0 6px; color: #fff; }
+.helpcard p { margin: 0; color: #bbb; }
+.trustband { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 16px 20px; margin: 24px 0; display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.paybadges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.paybadges span { background: #fff; color: #111; font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 4px; letter-spacing: .5px; }
+.cartitem { display: flex; gap: 14px; align-items: center; background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 12px; margin: 10px 0; }
+.cartitem img { width: 80px; height: 80px; object-fit: contain; background: #f5f2ea; border-radius: 6px; }
+.cartitem button { background: #333; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+@media (max-width: 760px) {
+  .helpgrid { grid-template-columns: 1fr; }
+  .cartlink { margin-left: 0; }
+}

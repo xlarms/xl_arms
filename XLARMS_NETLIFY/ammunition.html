@@ -12,14 +12,15 @@
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-<div class="topbar"><div class="wrap"><span>Premium Firearms &amp; Tactical Gear — Norcross, GA</span><span><a href="index.html">FFL Dealers</a><a href="index.html">Contact</a></span></div></div>
+<div class="topbar"><div class="wrap"><span>Premium Firearms &amp; Tactical Gear — Norcross, GA</span><span><a href="account.html">Account</a><a href="index.html#help">Help</a><a href="ffl.html">FFL Dealers</a><a href="contact.html">Contact Us</a></span></div></div>
 <header><div class="wrap">
   <div class="headrow">
     <a class="logo" href="index.html"><img src="images/logo.png" alt="XL Arms logo" onerror="this.style.display='none'"></a>
-    <form class="headsearch" role="search" action="index.html"><input type="search" name="q" placeholder="Search by keyword, brand, model or SKU — e.g. Glock 19, 9mm" aria-label="Search products"><button type="submit">Search</button></form>
+    <form class="headsearch" role="search" action="shop.html"><input type="search" name="q" placeholder="Search by keyword, brand, model or SKU — e.g. Glock 19, 9mm" aria-label="Search products"><button type="submit">Search</button></form>
     <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>Norcross, GA<br>Mon–Fri 10am–6pm EST</div>
+    <a class="cartlink" href="cart.html">🛒 Cart <span id="cartCount" class="cartcount">0</span></a>
   </div>
-  <nav><a href="index.html#shop">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#shop" class="deals">Daily Deals</a></nav>
+  <nav><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#featured" class="deals">Daily Deals</a></nav>
 </div></header>
 <main class="wrap">
   <p><a href="index.html">← Home</a> / Ammunition</p>
@@ -39,7 +40,7 @@
     <div id="results" class="grid"></div>
     <div id="pagination" style="margin-top:16px"></div>
   </div>
-  <p><a class="btn" href="index.html?category=Ammunition">Shop all Ammunition in the full shop →</a></p>
+  <p><a class="btn" href="shop.html?category=Ammunition">Shop all Ammunition in the full shop →</a></p>
   <section class="seo">
     <h2>Frequently asked questions — Ammunition</h2>
     <p><strong>Does ammunition require an FFL?</strong> No. Ammunition ships normally, but state and local restrictions still apply at checkout and some destinations are blocked.</p>
@@ -49,10 +50,11 @@
   </section>
 </main>
 <footer><div class="wrap"><div class="cols">
-  <div><h4>Shop</h4><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="optics.html">Optics</a><a href="accessories.html">Accessories</a></div>
-  <div><h4>Help</h4><a href="index.html">FFL Dealers</a><a href="index.html">Price-Match</a><a href="index.html">FFL Transfer Fee Offer</a><a href="index.html">Shipping &amp; Restrictions</a></div>
+  <div><h4>Shop</h4><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="optics.html">Optics</a><a href="accessories.html">Accessories</a></div>
+  <div><h4>Help</h4><a href="index.html#help">Help Center</a><a href="buying-guide.html">Buying a Gun Online</a><a href="ffl.html">FFL Dealers &amp; Transfers</a><a href="shipping.html">Shipping &amp; Restrictions</a><a href="returns.html">Returns</a><a href="warranty.html">Warranty</a></div>
+  <div><h4>Legal</h4><a href="terms.html">Terms &amp; Conditions</a><a href="privacy.html">Privacy Policy</a><a href="contact.html">Contact Us</a><a href="account.html">My Account</a><a href="cart.html">Cart</a></div>
   <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
-  <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site. Payment gateway to be confirmed before launch — this site does not take real orders yet.</p></div>
+  <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><div class="paybadges"><span>VISA</span><span>MASTERCARD</span><span>AMEX</span><span>DISCOVER</span></div><p class="meta">Secure checkout coming soon — payment gateway to be confirmed before launch.</p></div>
 </div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Category photos: Terrance Barksdale, Tima Miroshnichenko, Kadir Akman, Kony Xyzx and Dan Galvani Sommavilla, via Pexels (free to use).</div></div></footer>
 <div id="ageGate" class="agegate hidden" role="dialog" aria-modal="true" aria-labelledby="ageTitle">
   <div class="agebox"><div class="shield">🛡️</div><h2 id="ageTitle">Age Verification Required</h2><p>You must be at least <strong>18 years old</strong> to enter this website.</p><button class="btn" id="ageEnter">I am 18 or older — Enter</button><button class="btn btn-dark" id="ageExit">I am under 18 — Exit</button><p id="ageDenied" style="display:none;color:#ff8a80">Sorry — you must be 18 or older to shop here.</p></div>

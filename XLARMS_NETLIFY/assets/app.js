@@ -34,15 +34,77 @@ function score(p, toks, raw) {
   return matched === 0 ? 0 : matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
 function money(n) { return '$' + Number(n).toFixed(2); }
+function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+/* Cart: front-end only, stored in the browser (localStorage). No order is
+   placed and no payment is taken here — checkout is still to be wired once
+   a firearms-friendly gateway is approved in writing. */
+function getCart() { try { return JSON.parse(localStorage.getItem('xl_cart') || '[]'); } catch (e) { return []; } }
+function saveCart(c) { try { localStorage.setItem('xl_cart', JSON.stringify(c)); } catch (e) {} updateCartBadge(); }
+function updateCartBadge() {
+  const n = getCart().reduce((a, i) => a + (i.qty || 1), 0);
+  document.querySelectorAll('#cartCount').forEach((el) => { el.textContent = n; });
+}
+async function addToCart(sku) {
+  let p = null;
+  try {
+    const res = await fetch('/api/products?sku=' + encodeURIComponent(sku));
+    if (res.ok) { const d = await res.json(); p = (d.products || [])[0] || null; }
+  } catch (e) {}
+  if (!p) {
+    try { const r = await fetch('data/products.json'); const d = await r.json(); p = (d.products || []).find((x) => x.sku === sku) || null; } catch (e) {}
+  }
+  if (!p) return;
+  const cart = getCart();
+  const line = cart.find((i) => i.sku === p.sku);
+  if (line) line.qty += 1; else cart.push({ sku: p.sku, title: p.title, price: p.price, image: (p.images || [])[0] || 'images/placeholder.svg', is_firearm: !!p.is_firearm, qty: 1 });
+  saveCart(cart);
+  updateCartBadge();
+  alert('Added to cart: ' + p.title);
+}
+function clearCart() { saveCart([]); initCartPage(); }
+function cartQty(sku, d) {
+  const cart = getCart(); const line = cart.find((i) => i.sku === sku);
+  if (!line) return; line.qty += d; if (line.qty <= 0) cart.splice(cart.indexOf(line), 1);
+  saveCart(cart); initCartPage();
+}
+function cartRemove(sku) { saveCart(getCart().filter((i) => i.sku !== sku)); initCartPage(); }
+function initCartPage() {
+  const el = document.getElementById('cartItems'); if (!el) return;
+  const cart = getCart();
+  const totalEl = document.getElementById('cartTotal');
+  if (!cart.length) { el.innerHTML = '<p>Your cart is empty.</p><p><a class="btn" href="shop.html">Shop all products →</a></p>'; if (totalEl) totalEl.textContent = ''; return; }
+  let total = 0;
+  el.innerHTML = cart.map((i) => { total += i.price * i.qty; return `<div class="cartitem"><img src="${esc(i.image)}" alt=""><div><strong>${esc(i.title)}</strong><div class="meta">${esc(i.sku)}${i.is_firearm ? ' · Ships to your FFL' : ''}</div><div>${money(i.price)} × <button onclick="cartQty('${esc(i.sku)}',-1)">−</button> ${i.qty} <button onclick="cartQty('${esc(i.sku)}',1)">+</button> <button onclick="cartRemove('${esc(i.sku)}')">Remove</button></div></div><div class="price">${money(i.price * i.qty)}</div></div>`; }).join('');
+  if (totalEl) totalEl.textContent = 'Subtotal: ' + money(total);
+}
+/* Featured products (homepage): first in-stock products, one per category
+   where possible, so the strip looks like a store front, not a full grid. */
+async function initFeatured() {
+  const el = document.getElementById('featuredResults'); if (!el) return;
+  let items = [];
+  try {
+    const res = await fetch('/api/products?inStock=1&limit=48&page=1');
+    if (res.ok) { const d = await res.json(); items = d.products || []; }
+  } catch (e) {}
+  if (!items.length) {
+    try { const r = await fetch('data/products.json'); const d = await r.json(); items = (d.products || []).filter((p) => p.stock_qty > 0); } catch (e) {}
+  }
+  const seen = new Set(), picked = [];
+  for (const p of items) { if (!seen.has(p.category)) { seen.add(p.category); picked.push(p); } if (picked.length >= 8) break; }
+  for (const p of items) { if (picked.length >= 8) break; if (!picked.includes(p)) picked.push(p); }
+  el.innerHTML = picked.map(card).join('') || '<p>Featured products could not be loaded right now.</p>';
+}
 function card(p) {
   const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
+  const sku = String(p.sku).replace(/'/g, "\\'");
   return `<article class="card">
     <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}"></a>
     <h3><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title}</a></h3>
     <div class="meta">${p.brand} · ${p.category}${p.caliber ? ' · ' + p.caliber : ''}</div>
     <div class="price">${money(p.price)}</div>
     <div>${stock}</div>${ffl}
+    <button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>
   </article>`;
 }
 async function initShop() {
@@ -237,6 +299,7 @@ async function initProduct() {
     <h2>${p.title}</h2>
     <img src="${p.images[0]}" alt="${p.title}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px">
     <div class="price">${money(p.price)}</div><div>${stock}</div>${ffl}
+    <p><button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a></p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
       <tr><th>Model</th><td>${p.model}</td></tr>
@@ -252,4 +315,4 @@ async function initProduct() {
     <p>${p.description || ''}</p>
     ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
 }
-document.addEventListener('DOMContentLoaded', () => { initAgeGate(); initShop(); initCategoryGrid(); initProduct(); });
+document.addEventListener('DOMContentLoaded', () => { initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); updateCartBadge(); });
