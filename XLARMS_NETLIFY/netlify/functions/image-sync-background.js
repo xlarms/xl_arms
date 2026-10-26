@@ -156,6 +156,18 @@ async function loadManifest(blobs) {
   return { generated: null, prefix: null, images: {} };
 }
 
+// Automatic backfill: record a finished job sweep in backfill-auto.json
+// (same Blobs store as the manifest). Callers treat failures as
+// non-fatal warnings — the scheduler re-triggering a finished job is
+// harmless because it self-completes via skip-if-done.
+async function markJobDone(blobs, jobKey) {
+  const store = blobs.getStore('xl-arms-catalog');
+  const state = (await store.get('backfill-auto.json', { type: 'json' })) || {};
+  state.done = state.done || {};
+  state.done[jobKey] = { at: new Date().toISOString() };
+  await store.set('backfill-auto.json', JSON.stringify(state));
+}
+
 exports.handler = async (event) => {
   // Background function: Netlify returns 202 immediately; progress is in
   // the Functions log. The caller does NOT see this summary in the response.
@@ -343,6 +355,14 @@ exports.handler = async (event) => {
     }
 
     await saveManifest();
+    // Automatic backfill: only hi-only SHARD sweeps mark jobs done (the
+    // auto queue's hi jobs). Standard sweeps and ?skus= test runs are not
+    // queue jobs and write no marker. Aborted runs write no marker.
+    if (!abortErr && hiOnly && qs.shard) {
+      const jobKey = `shard:${String(qs.shard).toLowerCase()}:hi`;
+      try { await markJobDone(blobs, jobKey); }
+      catch (e) { console.warn('Backfill marker NOT saved (scheduler will re-trigger once):', e.message); }
+    }
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Image sync OK', JSON.stringify({
       prefix, hiPrefix, hiOnly, skusAttempted: skus.length, synced: ok.length,

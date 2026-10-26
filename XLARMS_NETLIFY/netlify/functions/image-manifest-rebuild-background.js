@@ -28,6 +28,17 @@
 //   snapshot from whenever it was last filled); the rebuild log's
 //   skusCopied count shows it per shard, and staging (drive) remains as
 //   the gap-fill source for any shard that comes up short.
+//   HI FROM STAGING (last resort when FTP hi is unusable): the hi tree
+//   is NOT on the drive and NOT in the bucket's old tree, so hi must be
+//   fetched from RSR FTP somehow. If Netlify→RSR data connections prove
+//   unusable even with retries, Jonathan can download
+//   /ftp_highres_images/rsr_number/ with FileZilla (his connection works)
+//   and upload it to Wasabi staging-hi, then trigger per shard:
+//        /.netlify/functions/image-manifest-rebuild-background?shard=a&hi=1
+//   Hi files are named <SKU>_<n>_HR.jpg; the function copies them to
+//   <hiPrefix>/<SKU>/<n>.jpg and records hiCount/hiSizes, preserving the
+//   standard entries — the mirror image of the standard rebuild. Hi mode
+//   always uses staging-hi, never the bucket source.
 //   3. The function server-side-copies each staged file into the live
 //      layout the storefront serves — <prefix>/<SKU>/<n>.jpg, i.e. the
 //      shard folder is dropped and <SKU>_<n>.jpg is split into a folder
@@ -37,8 +48,9 @@
 // Rules it follows:
 //   - Numbering is gapless per SKU, like the FTP sync: only the 1,2,3...
 //     prefix is copied; files past a numbering gap are skipped (logged).
-//   - Existing hi-res entries are PRESERVED: the drive has no hi files, so
-//     this function never touches hiCount/hiSizes (FTP sync still owns hi).
+//   - The side a run does not own is PRESERVED: standard runs keep hi
+//     entries, hi runs keep standard entries, so the two tracks merge in
+//     either order.
 //   - A SKU whose standard sizes changed vs the manifest gets its Bunny
 //     prefix purged (same as the FTP sync); brand-new SKUs need no purge.
 //   - A copy failure on one SKU never kills the run; 20 straight copy
@@ -105,6 +117,18 @@ async function loadManifest(blobs) {
   return { generated: null, prefix: null, hiPrefix: null, images: {} };
 }
 
+// Automatic backfill: record a finished job sweep in backfill-auto.json
+// (same Blobs store as the manifest). Callers treat failures as
+// non-fatal warnings — the scheduler re-triggering a finished job is
+// harmless because it self-completes via skip-if-done.
+async function markJobDone(blobs, jobKey) {
+  const store = blobs.getStore('xl-arms-catalog');
+  const state = (await store.get('backfill-auto.json', { type: 'json' })) || {};
+  state.done = state.done || {};
+  state.done[jobKey] = { at: new Date().toISOString() };
+  await store.set('backfill-auto.json', JSON.stringify(state));
+}
+
 async function listAllKeys(s3, ListObjectsV2Command, bucket, prefix) {
   const keys = [];
   let token;
@@ -135,19 +159,27 @@ exports.handler = async (event) => {
     // tries the plain staging layout first, then the layout you get if the
     // whole rsr_number/ (or ftp_images/) folder was dragged in instead.
     // With ?source=bucket the existing bucket tree is the source instead.
+    // Hi mode (?hi=1) always uses staging-hi: hi files live only on RSR
+    // FTP, never in the bucket's old tree, so there is no bucket source.
     const fromBucket = qs.source === 'bucket';
+    const hiMode = qs.hi === '1';
+    const hiStaging = process.env.WASABI_HI_STAGING_PREFIX || 'products-staging-hi';
     let mode, candidates;
     if (qs['new-images']) {
-      mode = 'new-images';
-      candidates = fromBucket
-        ? [`ftp_images/new_images/`]
-        : [`${staging}/new_images/`, `${staging}/ftp_images/new_images/`];
+      mode = hiMode ? 'hi-new-images' : 'new-images';
+      candidates = hiMode
+        ? [`${hiStaging}/new_images/`, `${hiStaging}/ftp_highres_images/new_images/`]
+        : fromBucket
+          ? [`ftp_images/new_images/`]
+          : [`${staging}/new_images/`, `${staging}/ftp_images/new_images/`];
     } else if (qs.shard) {
       const shard = String(qs.shard).toLowerCase();
-      mode = `shard:${shard}`;
-      candidates = fromBucket
-        ? [`ftp_images/rsr_number/${shard}/`]
-        : [`${staging}/${shard}/`, `${staging}/rsr_number/${shard}/`, `${staging}/ftp_images/rsr_number/${shard}/`];
+      mode = hiMode ? `hi-shard:${shard}` : `shard:${shard}`;
+      candidates = hiMode
+        ? [`${hiStaging}/${shard}/`, `${hiStaging}/rsr_number/${shard}/`, `${hiStaging}/ftp_highres_images/rsr_number/${shard}/`]
+        : fromBucket
+          ? [`ftp_images/rsr_number/${shard}/`]
+          : [`${staging}/${shard}/`, `${staging}/rsr_number/${shard}/`, `${staging}/ftp_images/rsr_number/${shard}/`];
     } else {
       throw new Error('Pass ?shard=<a-z,num,#> (use %23 for #) or ?new-images=1.');
     }
@@ -158,9 +190,11 @@ exports.handler = async (event) => {
       if (found.length > 0) { sourcePrefix = cand; staged = found; break; }
     }
     if (!sourcePrefix) {
-      throw new Error(fromBucket
-        ? `Nothing found in the bucket's ftp_images/ tree for ${mode} — that shard may genuinely have no photos there (drive staging can fill gaps).`
-        : `Nothing found under staging for ${mode} — upload the shard folders into Wasabi '${staging}/' first (see file header).`);
+      throw new Error(`Nothing found for ${mode} — looked under: ${candidates.join(', ')}. ` + (hiMode
+        ? `Upload the hi shard folders into Wasabi '${hiStaging}/' first (see file header).`
+        : fromBucket
+          ? `That shard may genuinely have no photos there (drive staging can fill gaps).`
+          : `Upload the shard folders into Wasabi '${staging}/' first (see file header).`));
     }
 
     let blobs;
@@ -171,13 +205,17 @@ exports.handler = async (event) => {
     const manifest = await loadManifest(blobs);
     manifest.prefix = prefix;
     if (!manifest.hiPrefix) manifest.hiPrefix = prefix + '-hi';
+    const hiPrefix = manifest.hiPrefix;
+    const targetPrefix = hiMode ? hiPrefix : prefix;
 
     // Group staged files by SKU. The basename pattern is folder-agnostic,
     // so rsr_number/<shard>/ and new_images/ (flat or nested) both work.
+    // Hi files carry the _HR suffix: <SKU>_<n>_HR.jpg.
+    const namePattern = hiMode ? /^(.+?)_(\d+)_HR\.jpg$/i : /^(.+?)_(\d+)\.jpg$/i;
     const bySku = new Map();
     for (const { key, size } of staged) {
       const base = key.split('/').pop();
-      const m = base.match(/^(.+?)_(\d+)\.jpg$/i);
+      const m = base.match(namePattern);
       if (!m) continue; // not a product photo (e.g. a category tile) — skip
       const sku = m[1];
       const n = parseInt(m[2], 10);
@@ -204,7 +242,7 @@ exports.handler = async (event) => {
       // makes the log visibly advance instead of staying quiet.
       if (idx > 0 && idx % 500 === 0) {
         await saveManifest();
-        console.log('Manifest rebuild progress', JSON.stringify({ mode, processed: idx, skusTotal: sortedSkus.length, filesCopied }));
+        console.log('Manifest rebuild progress', JSON.stringify({ mode, hi: hiMode, processed: idx, skusTotal: sortedSkus.length, filesCopied }));
       }
       try {
         const nums = bySku.get(sku);
@@ -220,8 +258,10 @@ exports.handler = async (event) => {
         if (toCopy.length === 0) { results.push({ sku, status: 'no-gapless-images' }); continue; }
         const prev = manifest.images[sku];
         // Already done by an earlier run that saved progress: identical
-        // sizes mean the live files are already correct — skip the copies.
-        if (prev && prev.sizes && JSON.stringify(prev.sizes) === JSON.stringify(sizes)) {
+        // sizes on the side this run owns mean the live files are already
+        // correct — skip the copies.
+        const prevSideSizes = hiMode ? (prev && prev.hiSizes) : (prev && prev.sizes);
+        if (prevSideSizes && JSON.stringify(prevSideSizes) === JSON.stringify(sizes)) {
           results.push({ sku, status: 'already-done', count: sizes.length });
           consecutiveCopyErrors = 0;
           continue;
@@ -231,26 +271,24 @@ exports.handler = async (event) => {
           await s3.send(new CopyObjectCommand({
             Bucket: bucket,
             CopySource: copySource,
-            Key: `${prefix}/${sku}/${f.n}.jpg`,
+            Key: `${targetPrefix}/${sku}/${f.n}.jpg`,
             ContentType: 'image/jpeg',
             MetadataDirective: 'REPLACE',
           }));
           filesCopied++;
           bytesCopied += f.size;
         }
-        const changed = !!prev && prev.sizes && JSON.stringify(prev.sizes) !== JSON.stringify(sizes);
+        const changed = !!prev && prevSideSizes && JSON.stringify(prevSideSizes) !== JSON.stringify(sizes);
         let purge = 'n/a (new SKU, nothing cached yet)';
         if (changed) {
-          try { purge = await bunnyPurgePrefix(hostname, prefix, sku); }
+          try { purge = await bunnyPurgePrefix(hostname, targetPrefix, sku); }
           catch (e) { purge = `FAILED (logged, rebuild continues): ${e.message}`; }
         }
-        // Hi entries are preserved untouched — this function never owns hi.
-        manifest.images[sku] = {
-          count: sizes.length,
-          sizes,
-          hiCount: (prev && prev.hiCount) || 0,
-          hiSizes: (prev && prev.hiSizes) || [],
-        };
+        // The side this run does NOT own is preserved untouched: standard
+        // mode preserves hi, hi mode preserves standard.
+        manifest.images[sku] = hiMode
+          ? { count: (prev && prev.count) || 0, sizes: (prev && prev.sizes) || [], hiCount: sizes.length, hiSizes: sizes }
+          : { count: sizes.length, sizes, hiCount: (prev && prev.hiCount) || 0, hiSizes: (prev && prev.hiSizes) || [] };
         results.push({ sku, status: 'ok', count: sizes.length, changed, purge });
         consecutiveCopyErrors = 0;
       } catch (e) {
@@ -261,9 +299,19 @@ exports.handler = async (event) => {
     }
 
     await saveManifest();
+    // Automatic backfill: record this sweep as done (only for a run that
+    // was NOT aborted — a timed-out/aborted run writes no marker, so the
+    // scheduler triggers it again and it resumes via skip-if-done).
+    // mode: 'shard:a' | 'hi-shard:a' | 'new-images' | 'hi-new-images'
+    // jobKey: 'shard:a:standard' | 'shard:a:hi' | 'new-images:standard' | 'new-images:hi'
+    if (!abortErr) {
+      const jobKey = mode.startsWith('hi-') ? mode.slice(3) + ':hi' : mode + ':standard';
+      try { await markJobDone(blobs, jobKey); }
+      catch (e) { console.warn('Backfill marker NOT saved (scheduler will re-trigger once):', e.message); }
+    }
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Manifest rebuild OK', JSON.stringify({
-      mode, source: fromBucket ? 'bucket' : 'staging', sourcePrefix, targetPrefix: prefix,
+      mode, hi: hiMode, source: hiMode ? 'staging-hi' : (fromBucket ? 'bucket' : 'staging'), sourcePrefix, targetPrefix,
       skusCopied: ok.length, filesCopied, bytesCopied, skippedBeyondGap,
       skippedAlreadyDone: results.filter((r) => r.status === 'already-done').length,
       purged: ok.filter((r) => r.changed).map((r) => r.sku),

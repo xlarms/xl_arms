@@ -10,3 +10,9 @@
 # Importer is a background function, not a page route.
 # It must be triggered on a schedule (see the background importer function).
 # Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.
+
+# Fully automatic image backfill: the scheduler wakes on its own timer
+# and triggers one backfill job per wake (see netlify/functions/backfill-scheduler.js).
+# Schedules run in UTC and only on published deploys.
+[functions."backfill-scheduler"]
+  schedule = "*/30 * * * *"
