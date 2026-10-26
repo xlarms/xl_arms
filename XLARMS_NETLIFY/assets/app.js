@@ -179,7 +179,7 @@ async function initShop() {
   const stockEl = document.getElementById('instock');
   const sortEl = document.getElementById('sort');
   if (!listEl) return;
-  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null;
+  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0;
   function setOptions(el, values, label) {
     const cur = el.value;
     el.innerHTML = `<option value="">${label}</option>` + values.map((v) => `<option>${v}</option>`).join('');
@@ -192,11 +192,16 @@ async function initShop() {
       sort: sortEl.value === 'price-asc' ? 'price-asc' : sortEl.value === 'price-desc' ? 'price-desc' : '',
       page: String(page), limit: '48',
     });
+    const mySeq = ++renderSeq;
     let data = null;
     try {
       const res = await fetch('/api/products?' + params.toString());
       if (res.ok) data = await res.json();
     } catch (e) { /* fall through to sample fallback */ }
+    // Race guard: typing fires a render per keystroke and responses can
+    // finish out of order. Only the LATEST render may paint — a stale
+    // response (e.g. for "gl") must never overwrite the current term ("glock").
+    if (mySeq !== renderSeq) return;
     if (data && typeof data.total === 'number') {
       if (!facetsLoaded && data.facets) {
         setOptions(catEl, data.facets.categories, 'All categories');
@@ -246,6 +251,7 @@ async function initShop() {
     else if (sortEl.value === 'price-asc') items.sort((a, b) => a.price - b.price);
     else if (sortEl.value === 'price-desc') items.sort((a, b) => b.price - a.price);
     else items.sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
+    if (mySeq !== renderSeq) return; // stale fallback must not overwrite a newer render
     totalPages = Math.max(1, Math.ceil(items.length / 48));
     countEl.textContent = items.length + ' product' + (items.length === 1 ? '' : 's');
     listEl.innerHTML = items.slice((page - 1) * 48, page * 48).map(card).join('') || `<div class="banner"><strong>No exact match.</strong></div>`;
@@ -278,9 +284,10 @@ async function initCategoryGrid() {
   const pageEl = document.getElementById('pagination');
   const catQEl = document.getElementById('catQ');
   const catForm = document.getElementById('catSearchForm');
-  let page = 1, totalPages = 1;
+  let page = 1, totalPages = 1, renderSeq = 0;
   async function render() {
     const params = new URLSearchParams({ page: String(page), limit: '48' });
+    const mySeq = ++renderSeq;
     const userQ = catQEl ? catQEl.value.trim() : '';
     // Scoped search: on a category page, search stays INSIDE that category.
     // Category-type pages: category=... + q=user term (API applies both).
@@ -295,6 +302,10 @@ async function initCategoryGrid() {
     try {
       const res = await fetch('/api/products?' + params.toString());
       const data = await res.json();
+      // Race guard (same flaw as the shop grid): typing fires a render per
+      // keystroke and responses can finish out of order. Only the LATEST
+      // render may paint — a stale "gl" response must never overwrite "glock".
+      if (mySeq !== renderSeq) return;
       totalPages = Math.max(1, Math.ceil((data.total || 0) / 48));
       countEl.textContent = (data.total || 0) + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${page} of ${totalPages}` : '');
       listEl.innerHTML = (data.products || []).map(card).join('') || '<p>No products found in this category right now.</p>';
@@ -305,7 +316,7 @@ async function initCategoryGrid() {
         if (prev) prev.onclick = () => { if (page > 1) { page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
         if (next) next.onclick = () => { if (page < totalPages) { page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
       }
-    } catch (e) { listEl.innerHTML = '<p>Products could not be loaded right now.</p>'; }
+    } catch (e) { if (mySeq === renderSeq) listEl.innerHTML = '<p>Products could not be loaded right now.</p>'; }
   }
   if (catForm) catForm.addEventListener('submit', (e) => { e.preventDefault(); page = 1; render(); });
   if (catQEl) catQEl.addEventListener('input', () => { page = 1; render(); });
