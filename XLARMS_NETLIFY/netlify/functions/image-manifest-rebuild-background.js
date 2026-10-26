@@ -17,6 +17,17 @@
 //        /.netlify/functions/image-manifest-rebuild-background?shard=a
 //        ... ?shard=b ... ?shard=num ... ?shard=%23  ('#' must be encoded)
 //        /.netlify/functions/image-manifest-rebuild-background?new-images=1
+//   OR skip the upload entirely with ?source=bucket (added 2026-10-26
+//   when Jonathan caught the redundancy mid-transfer): the same standard
+//   photos already live in this bucket under the old site's ftp_images/
+//   tree, so the function can copy straight from there —
+//   ftp_images/rsr_number/<shard>/ (or ftp_images/new_images/) — into
+//   the live layout, with no drive upload at all:
+//        /.netlify/functions/image-manifest-rebuild-background?shard=a&source=bucket
+//   Whether the bucket tree covers every product is unproven (it is a
+//   snapshot from whenever it was last filled); the rebuild log's
+//   skusCopied count shows it per shard, and staging (drive) remains as
+//   the gap-fill source for any shard that comes up short.
 //   3. The function server-side-copies each staged file into the live
 //      layout the storefront serves — <prefix>/<SKU>/<n>.jpg, i.e. the
 //      shard folder is dropped and <SKU>_<n>.jpg is split into a folder
@@ -115,14 +126,20 @@ exports.handler = async (event) => {
     // Decide the source: one shard, or the new_images folder. The listing
     // tries the plain staging layout first, then the layout you get if the
     // whole rsr_number/ (or ftp_images/) folder was dragged in instead.
+    // With ?source=bucket the existing bucket tree is the source instead.
+    const fromBucket = qs.source === 'bucket';
     let mode, candidates;
     if (qs['new-images']) {
       mode = 'new-images';
-      candidates = [`${staging}/new_images/`, `${staging}/ftp_images/new_images/`];
+      candidates = fromBucket
+        ? [`ftp_images/new_images/`]
+        : [`${staging}/new_images/`, `${staging}/ftp_images/new_images/`];
     } else if (qs.shard) {
       const shard = String(qs.shard).toLowerCase();
       mode = `shard:${shard}`;
-      candidates = [`${staging}/${shard}/`, `${staging}/rsr_number/${shard}/`, `${staging}/ftp_images/rsr_number/${shard}/`];
+      candidates = fromBucket
+        ? [`ftp_images/rsr_number/${shard}/`]
+        : [`${staging}/${shard}/`, `${staging}/rsr_number/${shard}/`, `${staging}/ftp_images/rsr_number/${shard}/`];
     } else {
       throw new Error('Pass ?shard=<a-z,num,#> (use %23 for #) or ?new-images=1.');
     }
@@ -133,7 +150,9 @@ exports.handler = async (event) => {
       if (found.length > 0) { sourcePrefix = cand; staged = found; break; }
     }
     if (!sourcePrefix) {
-      throw new Error(`Nothing found under staging for ${mode} — upload the shard folders into Wasabi '${staging}/' first (see file header).`);
+      throw new Error(fromBucket
+        ? `Nothing found in the bucket's ftp_images/ tree for ${mode} — that shard may genuinely have no photos there (drive staging can fill gaps).`
+        : `Nothing found under staging for ${mode} — upload the shard folders into Wasabi '${staging}/' first (see file header).`);
     }
 
     let blobs;
@@ -216,7 +235,7 @@ exports.handler = async (event) => {
     await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Manifest rebuild OK', JSON.stringify({
-      mode, sourcePrefix, targetPrefix: prefix,
+      mode, source: fromBucket ? 'bucket' : 'staging', sourcePrefix, targetPrefix: prefix,
       skusCopied: ok.length, filesCopied, bytesCopied, skippedBeyondGap,
       purged: ok.filter((r) => r.changed).map((r) => r.sku),
       errors: results.filter((r) => r.status === 'error'),
