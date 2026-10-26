@@ -149,3 +149,29 @@ h1, h2, h3, header nav a, .tile h3, .dealtile h3, .helpcard h3, footer h4 {
   text-transform: uppercase;
 }
 .card h3 { text-transform: none; }
+
+/* Homepage white theme (2026-10-25): homepage only is white; every other
+   page keeps the black tactical background. Header, nav and footer stay dark. */
+body.home { background: #ffffff; color: #1f1a14; }
+body.home a { color: #c8232a; }
+body.home .trend, body.home .seo, body.home .dealtile, body.home .helpcard,
+body.home .trustband { background: #f6f5f2; border-color: #dddddd; color: #1f1a14; }
+body.home .trend a { background: #ffffff; border-color: #cccccc; color: #1f1a14; }
+body.home .dealtile h3, body.home .helpcard h3 { color: #111111; }
+body.home .dealtile p, body.home .helpcard p { color: #555555; }
+body.home .badges span { background: #f0ede6; border-color: #cccccc; color: #222222; }
+body.home .card { background: #ffffff; border-color: #dddddd; color: #1f1a14; }
+body.home .card h3 a { color: #111111; }
+body.home .card .meta { color: #666666; }
+/* Payment logos + footer credits link */
+.paybadges img { height: 26px; width: auto; background: #ffffff; border-radius: 4px; padding: 2px; }
+footer .fine a { display: inline; text-decoration: underline; }
+/* Homepage white theme: keep header, nav, footer and photo tiles dark/white
+   — the red link colour must not leak into them. */
+body.home header nav a { color: #eeeeee; }
+body.home header nav a.deals { color: #ffffff; }
+body.home footer a { color: #d8d2c4; }
+body.home .topbar a { color: #d8d2c4; }
+body.home .headcontact a, body.home .cartlink { color: #ffffff; }
+body.home .tile, body.home .tile h3 { color: #ffffff; }
+body.home .tile p { color: #dddddd; }
