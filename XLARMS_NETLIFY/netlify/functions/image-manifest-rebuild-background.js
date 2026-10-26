@@ -44,6 +44,12 @@
 //   - A copy failure on one SKU never kills the run; 20 straight copy
 //     failures aborts it (e.g. bad credentials), still saving the manifest
 //     with progress so far.
+//   Progress is saved every 500 SKUs and already-done SKUs (identical
+//   sizes already in the manifest) are skipped, so a timed-out run
+//   resumes on re-trigger instead of starting over. A manifest LOAD
+//   failure (e.g. an expired Blobs token) aborts the run — it must never
+//   proceed with a fresh manifest, or the save at the end would wipe
+//   existing entries.
 //
 // Env vars (same Wasabi vars as the image sync; NEVER in chat or code):
 //   WASABI_BUCKET, WASABI_KEY, WASABI_SECRET (secret), WASABI_REGION
@@ -89,11 +95,13 @@ async function bunnyPurgePrefix(hostname, prefix, sku) {
 }
 
 async function loadManifest(blobs) {
-  try {
-    const store = blobs.getStore('xl-arms-catalog');
-    const m = await store.get('images.json', { type: 'json' });
-    if (m && m.images && typeof m.images === 'object') return m;
-  } catch (e) { console.warn('No prior image manifest, starting fresh:', e.message); }
+  // Fail CLOSED on load errors (e.g. an expired Blobs token): the caller
+  // must abort, never proceed with a fresh manifest — saving that at the
+  // end would wipe every existing entry. Only a genuinely absent manifest
+  // (get returns null) yields a fresh one.
+  const store = blobs.getStore('xl-arms-catalog');
+  const m = await store.get('images.json', { type: 'json' });
+  if (m && m.images && typeof m.images === 'object') return m;
   return { generated: null, prefix: null, hiPrefix: null, images: {} };
 }
 
@@ -183,7 +191,21 @@ exports.handler = async (event) => {
     let filesCopied = 0;
     let bytesCopied = 0;
     let skippedBeyondGap = 0;
-    for (const sku of [...bySku.keys()].sort()) {
+    const sortedSkus = [...bySku.keys()].sort();
+    const saveManifest = async () => {
+      manifest.generated = new Date().toISOString();
+      await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
+    };
+    for (let idx = 0; idx < sortedSkus.length; idx++) {
+      const sku = sortedSkus[idx];
+      // Save progress regularly: if the run times out, at most the last
+      // batch is lost, and the next run of the same shard resumes (see
+      // the already-done skip below) instead of starting over. This also
+      // makes the log visibly advance instead of staying quiet.
+      if (idx > 0 && idx % 500 === 0) {
+        await saveManifest();
+        console.log('Manifest rebuild progress', JSON.stringify({ mode, processed: idx, skusTotal: sortedSkus.length, filesCopied }));
+      }
       try {
         const nums = bySku.get(sku);
         // Gapless prefix only: 1,2,3... until the first missing number.
@@ -196,6 +218,14 @@ exports.handler = async (event) => {
         }
         skippedBeyondGap += [...nums.keys()].filter((n) => n > sizes.length).length;
         if (toCopy.length === 0) { results.push({ sku, status: 'no-gapless-images' }); continue; }
+        const prev = manifest.images[sku];
+        // Already done by an earlier run that saved progress: identical
+        // sizes mean the live files are already correct — skip the copies.
+        if (prev && prev.sizes && JSON.stringify(prev.sizes) === JSON.stringify(sizes)) {
+          results.push({ sku, status: 'already-done', count: sizes.length });
+          consecutiveCopyErrors = 0;
+          continue;
+        }
         for (const f of toCopy) {
           const copySource = `${bucket}/${f.key.split('/').map(encodeURIComponent).join('/')}`;
           await s3.send(new CopyObjectCommand({
@@ -208,7 +238,6 @@ exports.handler = async (event) => {
           filesCopied++;
           bytesCopied += f.size;
         }
-        const prev = manifest.images[sku];
         const changed = !!prev && prev.sizes && JSON.stringify(prev.sizes) !== JSON.stringify(sizes);
         let purge = 'n/a (new SKU, nothing cached yet)';
         if (changed) {
@@ -231,12 +260,12 @@ exports.handler = async (event) => {
       }
     }
 
-    manifest.generated = new Date().toISOString();
-    await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
+    await saveManifest();
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Manifest rebuild OK', JSON.stringify({
       mode, source: fromBucket ? 'bucket' : 'staging', sourcePrefix, targetPrefix: prefix,
       skusCopied: ok.length, filesCopied, bytesCopied, skippedBeyondGap,
+      skippedAlreadyDone: results.filter((r) => r.status === 'already-done').length,
       purged: ok.filter((r) => r.changed).map((r) => r.sku),
       errors: results.filter((r) => r.status === 'error'),
       aborted: !!abortErr,

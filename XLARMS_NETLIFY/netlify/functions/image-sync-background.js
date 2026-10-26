@@ -142,11 +142,13 @@ async function bunnyPurgePrefix(hostname, prefix, sku) {
 }
 
 async function loadManifest(blobs) {
-  try {
-    const store = blobs.getStore('xl-arms-catalog');
-    const m = await store.get('images.json', { type: 'json' });
-    if (m && m.images && typeof m.images === 'object') return m;
-  } catch (e) { console.warn('No prior image manifest, starting fresh:', e.message); }
+  // Fail CLOSED on load errors (e.g. an expired Blobs token): the caller
+  // must abort, never proceed with a fresh manifest — saving that at the
+  // end would wipe every existing entry. Only a genuinely absent manifest
+  // (get returns null) yields a fresh one.
+  const store = blobs.getStore('xl-arms-catalog');
+  const m = await store.get('images.json', { type: 'json' });
+  if (m && m.images && typeof m.images === 'object') return m;
   return { generated: null, prefix: null, images: {} };
 }
 
