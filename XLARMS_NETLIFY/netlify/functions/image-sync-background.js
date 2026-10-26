@@ -29,6 +29,12 @@
 //   is recorded as an error, and 20 in a row aborts the run (the manifest
 //   is still saved with progress so far) instead of faking thousands of
 //   no-images records.
+//   FTPS data connections to RSR are flaky (2026-10-26: "Client network
+//   socket disconnected before secure TLS connection was established
+//   (data socket)"). A dead client rejects every later download instantly,
+//   so downloads go through downloadRetry: on a non-404 failure it
+//   reconnects with a fresh client and retries (up to 3 attempts, with a
+//   short backoff) instead of letting one dead connection kill the run.
 //
 // Modes (query params on the function URL):
 //   ?skus=SKU1,SKU2   sync exactly those SKUs (test mode; default when no
@@ -151,6 +157,31 @@ exports.handler = async (event) => {
     ftp = await ftpConnect();
     await ftp.cd('/');
 
+    // A dead FTPS client rejects every later download instantly, so a
+    // single data-socket failure must not kill the run: reconnect with a
+    // fresh client and retry the same file before giving up on it.
+    async function reconnectFtp() {
+      try { if (ftp) ftp.close(); } catch (e) { /* already closed */ }
+      ftp = await ftpConnect();
+      await ftp.cd('/');
+    }
+    async function downloadRetry(remotePath, maxAttempts = 3) {
+      let lastErr = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await downloadOne(ftp, remotePath);
+        } catch (e) {
+          lastErr = e;
+          if (isNotFoundError(e)) throw e; // genuine end of numbering
+          if (attempt < maxAttempts) {
+            try { await reconnectFtp(); } catch (re) { lastErr = re; }
+            await new Promise((r) => setTimeout(r, 500 * attempt));
+          }
+        }
+      }
+      throw new Error('FTP_DOWNLOAD:' + (lastErr && lastErr.message ? lastErr.message : String(lastErr)));
+    }
+
     // Decide the SKU list: explicit ?skus=, one ?shard=, or the test default.
     let skus = [];
     if (qs.skus) {
@@ -190,10 +221,12 @@ exports.handler = async (event) => {
           const remote = `ftp_images/rsr_number/${shard}/${sku}_${n}.jpg`;
           let buf;
           try {
-            buf = await downloadOne(ftp, remote);
+            buf = await downloadRetry(remote);
           } catch (e) {
-            if (!sampleDlError) sampleDlError = String((e && e.message) || e);
-            if (!isNotFoundError(e)) throw new Error('FTP_DOWNLOAD:' + (e && e.message ? e.message : String(e)));
+            if (String(e.message || '').startsWith('FTP_DOWNLOAD:')) {
+              if (!sampleDlError) sampleDlError = e.message;
+              throw e;
+            }
             break; // first missing number = no more images for this SKU
           }
           if (!buf || buf.length === 0) break;
@@ -210,9 +243,9 @@ exports.handler = async (event) => {
           const remote = `ftp_highres_images/rsr_number/${shard}/${sku}_${n}_HR.jpg`;
           let buf;
           try {
-            buf = await downloadOne(ftp, remote);
+            buf = await downloadRetry(remote);
           } catch (e) {
-            if (!isNotFoundError(e)) throw new Error('FTP_DOWNLOAD:' + (e && e.message ? e.message : String(e)));
+            if (String(e.message || '').startsWith('FTP_DOWNLOAD:')) throw e;
             break; // first missing number = no more hi images for this SKU
           }
           if (!buf || buf.length === 0) break;
