@@ -5,9 +5,9 @@
 // back to the 8-product sample file, and the user sees '8 products' even
 // though the import succeeded. Fix: filter/score server-side and return
 // only one page (default 48) + total + facets. The shop fetches pages.
-// Priority: Netlify Blobs (written by rsr-import-background.js), fallback
+// Priority: Netlify Blobs (written by the background importer), fallback
 // to data/products.json (starter sample) before the first import.
-// Never query RSR FTP live from this function.
+// Never query the supplier feed live from this function.
 const fs = require('fs');
 const path = require('path');
 

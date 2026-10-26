@@ -8,5 +8,5 @@
   status = 200
 
 # Importer is a background function, not a page route.
-# It must be triggered on a schedule (see netlify/functions/rsr-import-background.js).
-# Do NOT put RSR FTP, Wasabi, or Bunny credentials in this file — use Netlify environment variables.
+# It must be triggered on a schedule (see the background importer function).
+# Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.

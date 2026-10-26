@@ -7,7 +7,7 @@
    use images/categories/<name>.jpg when present, otherwise a dark gradient
    so the tile still looks finished. */
 * { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0d0d0d; color: #e8e8e8; line-height: 1.55; } /* Jonathan: black/dark pages look more tactical */
+body { font-family: 'Barlow', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0d0d0d; color: #e8e8e8; line-height: 1.55; } /* Jonathan: black/dark pages look more tactical */
 a { color: #ff7a70; } /* visible on the dark theme */
 .topbar { background: #000; color: #d8d2c4; font-size: 13px; }
 .topbar .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 20px; }
@@ -25,7 +25,7 @@ header .wrap, main.wrap, footer .wrap { max-width: 1140px; margin: 0 auto; }
 header nav { display: flex; gap: 18px; flex-wrap: wrap; border-top: 1px solid #333; padding: 10px 0; }
 header nav a { color: #eee; text-decoration: none; font-weight: 700; text-transform: uppercase; font-size: 14px; }
 header nav a.deals { color: #ff4d42; }
-.hero { background: #111; color: #fff; border-radius: 12px; padding: 36px 28px; margin: 18px 0; background-image: linear-gradient(90deg, rgba(0,0,0,.92), rgba(0,0,0,.65)); /* photo hero later: add a real RSR product photo here after image sync, never the previous designer's photos */ background-size: cover; background-position: center; }
+.hero { background: #111; color: #fff; border-radius: 12px; padding: 36px 28px; margin: 18px 0; background-image: linear-gradient(90deg, rgba(0,0,0,.92), rgba(0,0,0,.65)); /* photo hero later: add a real product photo here after image sync, never the previous designer's photos */ background-size: cover; background-position: center; }
 .hero h1 { margin: 0 0 8px; font-size: 38px; line-height: 1.1; max-width: 720px; }
 .hero p { color: #d8d2c4; max-width: 680px; margin: 0 0 14px; font-size: 17px; }
 .hero .searchbar { max-width: 680px; }
@@ -136,3 +136,16 @@ header nav a.deals { background: #d8232a; color: #fff; padding: 4px 14px; border
   .helpgrid { grid-template-columns: 1fr; }
   .cartlink { margin-left: 0; }
 }
+
+/* Fonts (2026-10-25): PSA-style — tall condensed bold uppercase headings
+   (Oswald) over a clean regular sans body (Barlow). System/Arial Narrow
+   fallbacks keep the condensed look if Google Fonts is blocked. */
+h1, h2, h3, h4, header nav a, .btn, .headsearch button, .tile h3,
+.dealtile h3, .helpcard h3, footer h4, .price {
+  font-family: 'Oswald', 'Arial Narrow', Arial, sans-serif;
+  letter-spacing: .4px;
+}
+h1, h2, h3, header nav a, .tile h3, .dealtile h3, .helpcard h3, footer h4 {
+  text-transform: uppercase;
+}
+.card h3 { text-transform: none; }

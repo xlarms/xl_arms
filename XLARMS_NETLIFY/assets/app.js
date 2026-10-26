@@ -83,15 +83,31 @@ async function initFeatured() {
   const el = document.getElementById('featuredResults'); if (!el) return;
   let items = [];
   try {
-    const res = await fetch('/api/products?inStock=1&limit=48&page=1');
+    const res = await fetch('/api/products?inStock=1&limit=100&page=1');
     if (res.ok) { const d = await res.json(); items = d.products || []; }
   } catch (e) {}
   if (!items.length) {
     try { const r = await fetch('data/products.json'); const d = await r.json(); items = (d.products || []).filter((p) => p.stock_qty > 0); } catch (e) {}
   }
-  const seen = new Set(), picked = [];
-  for (const p of items) { if (!seen.has(p.category)) { seen.add(p.category); picked.push(p); } if (picked.length >= 8) break; }
-  for (const p of items) { if (picked.length >= 8) break; if (!picked.includes(p)) picked.push(p); }
+  // Curated variety, not the first page of the catalog (which was all holsters):
+  // a pistol, a red dot, a bag, a shotgun, an AR-15, then more mixed picks.
+  const hay = (p) => [p.title, p.brand, p.model, p.category, p.caliber].join(' ').toLowerCase();
+  const picked = [];
+  const take = (pred) => { const p = items.find((x) => !picked.includes(x) && pred(x)); if (p) picked.push(p); };
+  take((p) => p.category === 'Handguns' || hay(p).includes('pistol'));
+  take((p) => hay(p).includes('red dot') || hay(p).includes('reflex') || (hay(p).includes('dot') && p.category === 'Optics') || p.category === 'Optics');
+  take((p) => /soft cases|packs|bags/.test(p.category) || /range bag|backpack|duffel|gun bag/.test(hay(p)));
+  take((p) => p.category === 'Shotguns' || hay(p).includes('shotgun'));
+  take((p) => hay(p).includes('ar-15') || hay(p).includes('ar15'));
+  // Fill to 8 with new categories first, never a second 1791 holster.
+  for (const p of items) {
+    if (picked.length >= 8) break;
+    if (!picked.includes(p) && !picked.some((q) => q.category === p.category) && p.brand !== '1791') picked.push(p);
+  }
+  for (const p of items) {
+    if (picked.length >= 8) break;
+    if (!picked.includes(p) && p.brand !== '1791') picked.push(p);
+  }
   el.innerHTML = picked.map(card).join('') || '<p>Featured products could not be loaded right now.</p>';
 }
 function card(p) {
@@ -309,7 +325,7 @@ async function initProduct() {
       ${p.barrel_in ? `<tr><th>Barrel</th><td>${p.barrel_in}"</td></tr>` : ''}
       ${p.capacity ? `<tr><th>Capacity</th><td>${p.capacity}</td></tr>` : ''}
       ${p.finish ? `<tr><th>Finish</th><td>${p.finish}</td></tr>` : ''}
-      <tr><th>SKU / RSR #</th><td>${p.sku}</td></tr>
+      <tr><th>SKU</th><td>${p.sku}</td></tr>
       <tr><th>UPC</th><td>${p.upc}</td></tr>
     </table>
     <p>${p.description || ''}</p>

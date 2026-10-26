@@ -9,6 +9,9 @@
 <meta property="og:title" content="XL Arms — Firearms, Ammunition & Accessories, Norcross, GA">
 <meta property="og:description" content="26,000+ firearms, ammunition and accessories in stock. Ships to your FFL. Price-match + up to $25 FFL transfer fee covered if proven.">
 <meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -29,7 +32,6 @@
 <p>Create an account to save your FFL dealer, track orders and check out faster once checkout launches. Accounts are handled by Netlify Identity for this site.</p>
 <div id="accountStatus" class="seo"><p>Checking account status…</p></div>
 <p><button class="btn" id="loginBtn">Log in / Sign up</button> <button class="btn btn-dark" id="logoutBtn" style="display:none">Log out</button></p>
-<p class="meta">If the sign-in window does not open, Netlify Identity needs to be enabled for this site in Netlify (Site settings → Identity → Enable).</p>
 <h2>What an account gives you</h2><ul><li>Saved FFL dealer for faster firearm orders</li><li>Order history and tracking</li><li>Faster checkout with saved details</li></ul>
 <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 <script>if(window.netlifyIdentity){netlifyIdentity.on('init',function(u){var s=document.getElementById('accountStatus');var lo=document.getElementById('logoutBtn');if(u){s.innerHTML='<p>Signed in as <strong>'+u.email+'</strong>.</p>';lo.style.display='inline-block';}else{s.innerHTML='<p>You are not signed in yet. Use the button above to log in or create an account.</p>';}});netlifyIdentity.on('login',function(){document.location.reload();});netlifyIdentity.on('logout',function(){document.location.reload();});document.getElementById('loginBtn').onclick=function(){netlifyIdentity.open();};document.getElementById('logoutBtn').onclick=function(){netlifyIdentity.logout();};}else{document.getElementById('accountStatus').innerHTML='<p>Account sign-in is not available yet — Netlify Identity needs to be enabled for this site.</p>';}</script></main>
@@ -39,7 +41,7 @@
   <div><h4>Legal</h4><a href="terms.html">Terms &amp; Conditions</a><a href="privacy.html">Privacy Policy</a><a href="contact.html">Contact Us</a><a href="account.html">My Account</a><a href="cart.html">Cart</a></div>
   <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
   <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><div class="paybadges"><span>VISA</span><span>MASTERCARD</span><span>AMEX</span><span>DISCOVER</span></div><p class="meta">Secure checkout coming soon — payment gateway to be confirmed before launch.</p></div>
-</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Category photos: Terrance Barksdale, Tima Miroshnichenko, Kadir Akman, Kony Xyzx and Dan Galvani Sommavilla, via Pexels (free to use). Prices are MAP. Stock synced from RSR.</div></div></footer>
+</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Category photos: Terrance Barksdale, Tima Miroshnichenko, Kadir Akman, Kony Xyzx and Dan Galvani Sommavilla, via Pexels (free to use). Prices are MAP.</div></div></footer>
 
 <div id="ageGate" class="agegate hidden" role="dialog" aria-modal="true" aria-labelledby="ageTitle">
   <div class="agebox">
