@@ -4,17 +4,24 @@
 // near Netlify's 1 GB memory ceiling, and image bytes must never ride along
 // with it. This function only moves image bytes and writes one small manifest.
 //
-// What it does per SKU (standard images only for now; high-res is a later step):
+// What it does per SKU (standard + high-res, one pass):
 //   1. Download /ftp_images/rsr_number/<shard>/<SKU>_1.jpg, _2.jpg, ... from
 //      RSR FTP (stops at the first missing number; numbering is sequential).
 //   2. Upload each to Wasabi as <WASABI_PREFIX>/<SKU>/<n>.jpg.
-//   3. Record { count, sizes } in the Blobs manifest (key 'images.json' in
-//      store 'xl-arms-catalog'). get-products.js serves Bunny URLs for SKUs
-//      in the manifest and the placeholder for everything else — so images
-//      appear gradually and a SKU never shows another product's photo.
-//   4. If a SKU was already in the manifest and its image sizes changed,
-//      purge its Bunny prefix (<host>/<prefix>/<SKU>/*). Brand-new SKUs need
-//      no purge (nothing cached yet). Purge failures are logged, never fatal.
+//   3. Download the high-res mirror /ftp_highres_images/rsr_number/<shard>/
+//      <SKU>_n.jpg (same numbering, may be fewer or absent) and upload each
+//      to Wasabi as <WASABI_HI_PREFIX>/<SKU>/<n>.jpg. The storefront uses
+//      standard images everywhere and high-res only inside the product-page
+//      lightbox, so pages stay fast while zoom gets genuinely huge.
+//   4. Record { count, sizes, hiCount, hiSizes } in the Blobs manifest (key
+//      'images.json' in store 'xl-arms-catalog'). get-products.js serves
+//      Bunny URLs for SKUs in the manifest and the placeholder for
+//      everything else — so images appear gradually and a SKU never shows
+//      another product's photo.
+//   5. If a SKU was already in the manifest and its image sizes changed,
+//      purge its Bunny prefix (<host>/<prefix>/<SKU>/*, and the hi prefix
+//      when hi sizes changed). Brand-new SKUs need no purge (nothing cached
+//      yet). Purge failures are logged, never fatal.
 //
 // Modes (query params on the function URL):
 //   ?skus=SKU1,SKU2   sync exactly those SKUs (test mode; default when no
@@ -29,6 +36,7 @@
 //   WASABI_ENDPOINT      (optional override, else s3.<region>.wasabisys.com)
 //   WASABI_PREFIX        (default 'products' — a NEW folder, never the old
 //                         site's /ftp_images/ paths, so the old site is untouched)
+//   WASABI_HI_PREFIX     (default '<WASABI_PREFIX>-hi', e.g. 'products-hi')
 //   BUNNY_HOSTNAME       (pull-zone hostname, e.g. xxx.b-cdn.net, no scheme)
 //   BUNNY_API_KEY        (optional — purge only; sync works without it)
 //   IMAGE_PREFIX         (site URL prefix; defaults to WASABI_PREFIX)
@@ -116,6 +124,7 @@ exports.handler = async (event) => {
   try {
     const qs = event.queryStringParameters || {};
     const prefix = process.env.WASABI_PREFIX || 'products';
+    const hiPrefix = process.env.WASABI_HI_PREFIX || (prefix + '-hi');
     const hostname = process.env.BUNNY_HOSTNAME || '';
     if (!process.env.WASABI_BUCKET || !process.env.WASABI_KEY || !process.env.WASABI_SECRET) {
       throw new Error('Missing Wasabi env vars — set WASABI_BUCKET, WASABI_KEY, WASABI_SECRET (and WASABI_REGION) in Netlify, then redeploy.');
@@ -150,6 +159,7 @@ exports.handler = async (event) => {
     try { blobs.connectLambda(event); } catch (e) { console.warn('connectLambda skipped:', e.message); }
     const manifest = await loadManifest(blobs);
     manifest.prefix = prefix;
+    manifest.hiPrefix = hiPrefix;
 
     const results = [];
     for (const sku of skus) {
@@ -171,16 +181,40 @@ exports.handler = async (event) => {
           }));
           sizes.push(buf.length);
         }
+        // High-res mirror: same numbering, independent loop (a SKU can have
+        // fewer hi images than standard, or none at all).
+        const hiSizes = [];
+        for (let n = 1; n <= MAX_IMAGES_PER_SKU; n++) {
+          const remote = `ftp_highres_images/rsr_number/${shard}/${sku}_${n}.jpg`;
+          let buf;
+          try {
+            buf = await downloadOne(ftp, remote);
+          } catch (e) {
+            break; // first missing number = no more hi images for this SKU
+          }
+          if (!buf || buf.length === 0) break;
+          await s3.send(new PutObjectCommand({
+            Bucket: bucket, Key: `${hiPrefix}/${sku}/${n}.jpg`,
+            Body: buf, ContentType: 'image/jpeg',
+          }));
+          hiSizes.push(buf.length);
+        }
         if (sizes.length === 0) { results.push({ sku, status: 'no-images-on-ftp' }); continue; }
         const prev = manifest.images[sku];
         const changed = !!prev && JSON.stringify(prev.sizes || []) !== JSON.stringify(sizes);
+        const hiChanged = !!prev && (prev.hiCount || 0) > 0 && JSON.stringify(prev.hiSizes || []) !== JSON.stringify(hiSizes);
         let purge = 'n/a (new SKU, nothing cached yet)';
         if (changed) {
           try { purge = await bunnyPurgePrefix(hostname, prefix, sku); }
           catch (e) { purge = `FAILED (logged, sync continues): ${e.message}`; }
         }
-        manifest.images[sku] = { count: sizes.length, sizes };
-        results.push({ sku, status: 'ok', count: sizes.length, changed, purge });
+        let hiPurge = 'n/a (new hi images, nothing cached yet)';
+        if (hiChanged) {
+          try { hiPurge = await bunnyPurgePrefix(hostname, hiPrefix, sku); }
+          catch (e) { hiPurge = `FAILED (logged, sync continues): ${e.message}`; }
+        }
+        manifest.images[sku] = { count: sizes.length, sizes, hiCount: hiSizes.length, hiSizes };
+        results.push({ sku, status: 'ok', count: sizes.length, changed, purge, hiCount: hiSizes.length, hiChanged, hiPurge });
       } catch (e) {
         results.push({ sku, status: 'error', error: e.message });
       }
@@ -190,11 +224,13 @@ exports.handler = async (event) => {
     await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Image sync OK', JSON.stringify({
-      prefix, skusAttempted: skus.length, synced: ok.length,
+      prefix, hiPrefix, skusAttempted: skus.length, synced: ok.length,
       images: ok.reduce((a, r) => a + r.count, 0),
+      hiImages: ok.reduce((a, r) => a + (r.hiCount || 0), 0),
       noImages: results.filter((r) => r.status === 'no-images-on-ftp').map((r) => r.sku),
       errors: results.filter((r) => r.status === 'error'),
       purged: results.filter((r) => r.changed).map((r) => r.sku),
+      hiPurged: results.filter((r) => r.hiChanged).map((r) => r.sku),
     }));
     return { statusCode: 202, body: JSON.stringify({ ok: true, note: 'Background image sync started — check Functions log for Image sync OK.' }) };
   } catch (e) {

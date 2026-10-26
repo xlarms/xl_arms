@@ -203,7 +203,7 @@ body.home .tile p { color: #dddddd; }
 .pthumbs img.active { border-color: #b81e24; }
 .plightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.92); display: none; align-items: center; justify-content: center; z-index: 9999; }
 .plightbox.open { display: flex; }
-.plightbox img { max-width: 92vw; max-height: 88vh; border-radius: 8px; background: #111; object-fit: contain; }
+.plightbox img { max-width: 96vw; max-height: 94vh; border-radius: 8px; background: #111; object-fit: contain; }
 .plb-btn { position: absolute; background: rgba(255, 255, 255, 0.14); color: #fff; border: 0; border-radius: 50%; cursor: pointer; line-height: 1; }
 .plb-btn:hover { background: rgba(255, 255, 255, 0.3); }
 .plb-close { top: 16px; right: 20px; width: 44px; height: 44px; font-size: 28px; }

@@ -110,7 +110,7 @@ async function loadCatalog(event) {
   return JSON.parse(fs.readFileSync(file, 'utf8')).products || [];
 }
 
-// Image manifest (written by image-sync-background.js): { images: { SKU: { count } } }.
+// Image manifest (written by image-sync-background.js): { images: { SKU: { count, hiCount } } }.
 // Best-effort — a missing manifest just means placeholders stay.
 async function loadImageManifest(event) {
   try {
@@ -134,11 +134,19 @@ exports.handler = async (event) => {
       const manifest = await loadImageManifest(event);
       if (manifest) {
         const prefix = process.env.IMAGE_PREFIX || manifest.prefix || 'products';
+        const hiPrefix = process.env.IMAGE_HI_PREFIX || manifest.hiPrefix || (prefix + '-hi');
         for (const p of all) {
           const entry = manifest.images[p.sku];
           if (entry && entry.count > 0) {
             p.images = [];
             for (let n = 1; n <= entry.count; n++) p.images.push(`https://${bunnyHost}/${prefix}/${p.sku}/${n}.jpg`);
+            // High-res twins for the product-page lightbox only (added
+            // 2026-10-26). Absent when the SKU has no hi images — the page
+            // falls back to the standard URLs.
+            if (entry.hiCount > 0) {
+              p.hires = [];
+              for (let n = 1; n <= entry.hiCount; n++) p.hires.push(`https://${bunnyHost}/${hiPrefix}/${p.sku}/${n}.jpg`);
+            }
           }
         }
       }

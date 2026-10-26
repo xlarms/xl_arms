@@ -512,6 +512,7 @@ async function initProduct() {
     <p>${p.description || ''}</p>
     ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
   window.__pgImgs = (p.images || []).filter(Boolean);
+  window.__pgHi = (p.hires || []).filter(Boolean);
   window.__pgIdx = 0;
 }
 function setPgImage(i) {
@@ -522,7 +523,7 @@ function setPgImage(i) {
   if (main) main.src = imgs[i];
   document.querySelectorAll('.pthumb').forEach((t, j) => t.classList.toggle('active', j === i));
   const lb = document.getElementById('plbImg');
-  if (lb) lb.src = imgs[i];
+  if (lb) lb.src = (window.__pgHi || [])[i] || imgs[i];
 }
 function openPgLightbox(i) {
   const imgs = window.__pgImgs || [];
