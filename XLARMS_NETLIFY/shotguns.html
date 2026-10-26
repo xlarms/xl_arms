@@ -16,17 +16,23 @@
 <header><div class="wrap">
   <div class="headrow">
     <a class="logo" href="index.html"><img src="images/logo.png" alt="XL Arms logo" onerror="this.style.display='none'"></a>
-    <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>6060 Dawson Blvd B, Norcross, GA<br>Mon–Fri 10am–6pm EST</div>
+    <form class="headsearch" role="search" action="index.html"><input type="search" name="q" placeholder="Search by keyword, brand, model or SKU — e.g. Glock 19, 9mm" aria-label="Search products"><button type="submit">Search</button></form>
+    <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>Norcross, GA<br>Mon–Fri 10am–6pm EST</div>
   </div>
-  <nav><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#shop" class="deals">Daily Deals</a></nav>
+  <nav><a href="index.html#shop">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#shop" class="deals">Daily Deals</a></nav>
 </div></header>
 <main class="wrap">
   <p><a href="index.html">← Home</a> / Shotguns</p>
-  <section class="hero">
+  <section class="hero" style="background-image:linear-gradient(90deg, rgba(0,0,0,.88), rgba(0,0,0,.55)), url(images/categories/shotguns.jpg)">
     <h1>Shotguns for Sale — Tactical &amp; Sporting</h1>
     <p>Shotguns for home defense, hunting and sport: pump-action, semi-automatic, over-under and side-by-side shotguns in 12 gauge, 20 gauge, 28 gauge and 410 bore. Pair your shotgun with the right ammunition — birdshot, buckshot and slugs are all in the Ammunition section, with shell length and shot size in the product details. As with all firearms, shotguns ship to your FFL dealer, not to your home.</p>
     <div class="badges"><span>✓ Price-match offer</span><span>✓ FFL transfer fee covered up to $25 if proven</span><span>✓ Ships to your FFL (firearms)</span></div>
   </section>
+
+  <form id="catSearchForm" class="searchbar" role="search">
+    <input id="catQ" type="search" placeholder="Search within this category — e.g. 9mm, Glock, .308" aria-label="Search within this category">
+    <button type="submit">Search this category</button>
+  </form>
   <h2>Shop Shotguns — In Stock First</h2>
   <div id="categoryResults" data-shop-type="q" data-shop-value="shotgun">
     <p id="count"></p>
@@ -45,9 +51,9 @@
 <footer><div class="wrap"><div class="cols">
   <div><h4>Shop</h4><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="optics.html">Optics</a><a href="accessories.html">Accessories</a></div>
   <div><h4>Help</h4><a href="index.html">FFL Dealers</a><a href="index.html">Price-Match</a><a href="index.html">FFL Transfer Fee Offer</a><a href="index.html">Shipping &amp; Restrictions</a></div>
-  <div><h4>Contact</h4><span>6060 Dawson Blvd B, Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
+  <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
   <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site. Payment gateway to be confirmed before launch — this site does not take real orders yet.</p></div>
-</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved.</div></div></footer>
+</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Category photos: Terrance Barksdale, Tima Miroshnichenko, Kadir Akman, Kony Xyzx and Dan Galvani Sommavilla, via Pexels (free to use).</div></div></footer>
 <div id="ageGate" class="agegate hidden" role="dialog" aria-modal="true" aria-labelledby="ageTitle">
   <div class="agebox"><div class="shield">🛡️</div><h2 id="ageTitle">Age Verification Required</h2><p>You must be at least <strong>18 years old</strong> to enter this website.</p><button class="btn" id="ageEnter">I am 18 or older — Enter</button><button class="btn btn-dark" id="ageExit">I am under 18 — Exit</button><p id="ageDenied" style="display:none;color:#ff8a80">Sorry — you must be 18 or older to shop here.</p></div>
 </div>

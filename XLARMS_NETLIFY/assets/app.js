@@ -152,11 +152,22 @@ async function initCategoryGrid() {
   const listEl = document.getElementById('results');
   const countEl = document.getElementById('count');
   const pageEl = document.getElementById('pagination');
+  const catQEl = document.getElementById('catQ');
+  const catForm = document.getElementById('catSearchForm');
   let page = 1, totalPages = 1;
   async function render() {
     const params = new URLSearchParams({ page: String(page), limit: '48' });
-    if (holder.dataset.shopType === 'category') params.set('category', holder.dataset.shopValue);
-    else params.set('q', holder.dataset.shopValue);
+    const userQ = catQEl ? catQEl.value.trim() : '';
+    // Scoped search: on a category page, search stays INSIDE that category.
+    // Category-type pages: category=... + q=user term (API applies both).
+    // Q-type pages (rifles/shotguns): base term + user term combined, so a
+    // search for "AR-15" on the Rifles page still returns rifles, not all products.
+    if (holder.dataset.shopType === 'category') {
+      params.set('category', holder.dataset.shopValue);
+      if (userQ) params.set('q', userQ);
+    } else {
+      params.set('q', userQ ? (holder.dataset.shopValue + ' ' + userQ) : holder.dataset.shopValue);
+    }
     try {
       const res = await fetch('/api/products?' + params.toString());
       const data = await res.json();
@@ -172,6 +183,8 @@ async function initCategoryGrid() {
       }
     } catch (e) { listEl.innerHTML = '<p>Products could not be loaded right now.</p>'; }
   }
+  if (catForm) catForm.addEventListener('submit', (e) => { e.preventDefault(); page = 1; render(); });
+  if (catQEl) catQEl.addEventListener('input', () => { page = 1; render(); });
   render();
 }
 function initAgeGate() {

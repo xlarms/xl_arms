@@ -10,7 +10,7 @@
 <meta property="og:description" content="26,000+ firearms, ammunition and accessories in stock. Ships to your FFL. Price-match + up to $25 FFL transfer fee covered if proven.">
 <meta property="og:type" content="website">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"GunStore","name":"XL Arms","url":"https://xlarms.us","telephone":"(678) 691-6375","email":"info@xlarms.us","address":{"@type":"PostalAddress","streetAddress":"6060 Dawson Blvd B","addressLocality":"Norcross","addressRegion":"GA","addressCountry":"US"},"openingHours":"Mo-Fr 10:00-18:00","priceRange":"$$"}
+{"@context":"https://schema.org","@type":"GunStore","name":"XL Arms","url":"https://xlarms.us","telephone":"(678) 691-6375","email":"info@xlarms.us","address":{"@type":"PostalAddress","addressLocality":"Norcross","addressRegion":"GA","addressCountry":"US"},"openingHours":"Mo-Fr 10:00-18:00","priceRange":"$$"}
 </script>
 <link rel="stylesheet" href="assets/style.css">
 </head>
@@ -19,35 +19,28 @@
 <header><div class="wrap">
   <div class="headrow">
     <a class="logo" href="index.html"><img src="images/logo.png" alt="XL Arms logo" onerror="this.style.display='none'"></a>
-    <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>6060 Dawson Blvd B, Norcross, GA<br>Mon–Fri 10am–6pm EST</div>
+    <form class="headsearch" role="search" action="index.html"><input id="q" type="search" name="q" placeholder="Search by keyword, brand, model or SKU — e.g. Glock 19, 9mm" aria-label="Search products"><button type="submit">Search</button></form>
+    <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>Norcross, GA<br>Mon–Fri 10am–6pm EST</div>
   </div>
-  <nav><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#shop" class="deals">Daily Deals</a></nav>
+  <nav><a href="index.html#shop">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#shop" class="deals">Daily Deals</a></nav>
 </div></header>
 <main class="wrap">
-  <section class="hero">
-    <h1>Firearms, Ammunition &amp; Accessories in Norcross, GA</h1>
-    <p>Over 26,000 products in stock from RSR — handguns, rifles, shotguns, ammo, optics and gear, at MAP with price-match. Firearms ship to your FFL, not to your home.</p>
-    <form id="searchForm" class="searchbar" role="search" action="index.html">
-      <input id="q" type="search" name="q" placeholder="Search brand + model, caliber, or SKU — e.g. Glock 19, 9mm, GLK19G5" aria-label="Search products">
-      <button type="submit">Search</button>
-    </form>
-    <div class="badges"><span>✓ Price-match offer</span><span>✓ FFL transfer fee covered up to $25 if proven</span><span>✓ Ships to your FFL</span><span>✓ In-stock counts from RSR</span></div>
-    <div id="suggestions"></div>
+  <section class="mosaic" aria-label="Shop by category">
+    <a class="tile big" style="background-image:url(images/categories/rifles.jpg)" href="rifles.html"><span class="t"><h3>Rifles</h3><p>AR-15, Bolt Action &amp; More</p></span></a>
+    <div class="mosaic-stack">
+      <a class="tile" style="background-image:url(images/categories/handguns.jpg)" href="handguns.html"><span class="t"><h3>Handguns</h3><p>Pistols &amp; Revolvers</p></span></a>
+      <a class="tile" style="background-image:url(images/categories/ammunition.jpg)" href="ammunition.html"><span class="t"><h3>Ammunition</h3><p>All Calibers In Stock</p></span></a>
+    </div>
   </section>
-
-  <h2>Shop by Category</h2>
-  <p>Find exactly what you need from our extensive selection.</p>
-  <div class="catgrid">
-    <a class="tile" href="handguns.html"><span class="t"><h3>Handguns</h3><p>Pistols &amp; Revolvers</p></span></a>
-    <a class="tile" href="rifles.html"><span class="t"><h3>Rifles</h3><p>AR-15, Bolt Action &amp; More</p></span></a>
-    <a class="tile" href="shotguns.html"><span class="t"><h3>Shotguns</h3><p>Tactical &amp; Sporting</p></span></a>
-    <a class="tile" href="ammunition.html"><span class="t"><h3>Ammunition</h3><p>All Calibers In Stock</p></span></a>
-    <a class="tile" href="optics.html"><span class="t"><h3>Optics &amp; Sights</h3><p>Scopes, Red Dots &amp; More</p></span></a>
-    <a class="tile" href="accessories.html"><span class="t"><h3>Accessories</h3><p>Gear &amp; Equipment</p></span></a>
+  <div class="mosaic-bottom">
+    <a class="tile" style="background-image:url(images/categories/shotguns.jpg)" href="shotguns.html"><span class="t"><h3>Shotguns</h3><p>Tactical &amp; Sporting</p></span></a>
+    <a class="tile" style="background-image:url(images/categories/optics.jpg)" href="optics.html"><span class="t"><h3>Optics &amp; Sights</h3><p>Scopes, Red Dots &amp; More</p></span></a>
+    <a class="tile" style="background-image:url(images/categories/accessories.jpg)" href="accessories.html"><span class="t"><h3>Accessories</h3><p>Gear &amp; Equipment</p></span></a>
   </div>
-  <p class="meta">Category tiles use a dark gradient for now. After the Wasabi/Bunny product-image sync, each tile can use a real RSR product photo for that category — never a photo from the previous designer, which Jonathan does not have.</p>
-
-  <h2 id="shop">Shop All Products</h2>
+  <section class="trend"><strong>Trending searches:</strong><a href="index.html?q=Glock+19">Glock 19</a><a href="index.html?q=9mm">9mm</a><a href="index.html?q=AR-15">AR-15</a><a href="index.html?q=.308">.308</a><a href="index.html?q=12+Gauge">12 Gauge</a><a href="index.html?q=red+dot">Red Dot</a></section>
+  <h2 id="shop">Welcome to XL Arms</h2>
+  <p>Your online gun store in Norcross, GA — over 26,000 firearms, ammunition and accessories in stock at MAP, with price-match. Firearms ship to your FFL, not to your home.</p>
+  <div class="badges"><span>✓ Price-match offer</span><span>✓ FFL transfer fee covered up to $25 if proven</span><span>✓ Ships to your FFL</span><span>✓ In-stock counts from RSR</span></div>
   <div class="layout">
     <aside class="filters">
       <h3>Filter</h3>
@@ -65,7 +58,13 @@
     </section>
   </div>
 
-  <section class="seo">
+
+  <section class="dealsrow">
+    <a class="dealtile" href="index.html#why"><h3>Price-Match Offer</h3><p>Found it lower elsewhere? Ask about our price-match — we sell at MAP.</p></a>
+    <a class="dealtile" href="index.html#why"><h3>FFL Fee Covered Up To $25</h3><p>Buy a firearm and we cover your FFL transfer fee up to $25 if proven.</p></a>
+    <a class="dealtile" href="ammunition.html"><h3>Bulk Ammunition</h3><p>Box and case quantities in stock, with caliber filters so you never substitute calibers.</p></a>
+  </section>
+  <section class="seo" id="why">
     <h2>Why buy from XL Arms?</h2>
     <p>XL Arms is a licensed firearms dealer in Norcross, Georgia, serving Metro Atlanta and shipping nationwide to licensed dealers. Our catalog is synced from RSR, one of the largest firearms distributors in the U.S., so the stock counts and MAP prices you see are real — not a static list that went stale months ago. If a price is lower elsewhere, ask about our price-match offer. If you buy a firearm, we cover your FFL transfer fee up to $25 if proven.</p>
     <h2>How buying a firearm online works</h2>
@@ -74,15 +73,15 @@
     <p><strong>Do you ship firearms to my home?</strong> No. Firearms ship only to a licensed FFL dealer of your choice for background check and pickup.</p>
     <p><strong>Are your prices MAP?</strong> Yes. We sell at MAP (minimum advertised price), with a price-match offer and up to $25 of your FFL transfer fee covered if proven.</p>
     <p><strong>Do you have ammunition in stock?</strong> Stock is synced from RSR. Use “In stock only” above to see only what is available right now.</p>
-    <p><strong>Where are you located?</strong> 6060 Dawson Blvd B, Norcross, GA — Mon–Fri 10am–6pm EST, (678) 691-6375, info@xlarms.us.</p>
+    <p><strong>Where are you located?</strong> Norcross, GA — Mon–Fri 10am–6pm EST, (678) 691-6375, info@xlarms.us.</p>
   </section>
 </main>
 <footer><div class="wrap"><div class="cols">
   <div><h4>Shop</h4><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="optics.html">Optics</a><a href="accessories.html">Accessories</a></div>
   <div><h4>Help</h4><a href="index.html">FFL Dealers</a><a href="index.html">Price-Match</a><a href="index.html">FFL Transfer Fee Offer</a><a href="index.html">Shipping &amp; Restrictions</a></div>
-  <div><h4>Contact</h4><span>6060 Dawson Blvd B, Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
+  <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>Mon–Fri 10am–6pm EST</span></div>
   <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site. Payment gateway to be confirmed before launch — this site does not take real orders yet.</p></div>
-</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Prices are MAP. Stock synced from RSR.</div></div></footer>
+</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. Category photos: Terrance Barksdale, Tima Miroshnichenko, Kadir Akman, Kony Xyzx and Dan Galvani Sommavilla, via Pexels (free to use). Prices are MAP. Stock synced from RSR.</div></div></footer>
 
 <div id="ageGate" class="agegate hidden" role="dialog" aria-modal="true" aria-labelledby="ageTitle">
   <div class="agebox">

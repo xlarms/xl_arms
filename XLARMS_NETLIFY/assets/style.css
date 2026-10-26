@@ -7,8 +7,8 @@
    use images/categories/<name>.jpg when present, otherwise a dark gradient
    so the tile still looks finished. */
 * { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f6f5f2; color: #1f1a14; line-height: 1.55; }
-a { color: #1f4d2e; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0d0d0d; color: #e8e8e8; line-height: 1.55; } /* Jonathan: black/dark pages look more tactical */
+a { color: #ff7a70; } /* visible on the dark theme */
 .topbar { background: #000; color: #d8d2c4; font-size: 13px; }
 .topbar .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 20px; }
 .topbar a { color: #d8d2c4; text-decoration: none; margin-left: 14px; }
@@ -16,7 +16,7 @@ header { background: #111; color: #fff; padding: 14px 20px 0; }
 header .wrap, main.wrap, footer .wrap { max-width: 1140px; margin: 0 auto; }
 .headrow { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-bottom: 14px; }
 .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; }
-.logo img { height: 52px; width: auto; border-radius: 50%; }
+.logo img { height: 110px; width: auto; border-radius: 50%; } /* Jonathan: logo was way too small at 52px */
 .logo .wordmark { font-weight: 900; line-height: 1; letter-spacing: .5px; }
 .logo .wordmark .xl { color: #e2231a; font-size: 28px; display: block; }
 .logo .wordmark .arms { color: #fff; font-size: 28px; display: block; }
@@ -35,7 +35,7 @@ header nav a.deals { color: #ff4d42; }
 .btn-outline { background: transparent; color: #fff; border: 2px solid #fff; }
 .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .badges span { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.35); padding: 5px 10px; border-radius: 20px; font-size: 13px; }
-.banner { background: #fff3cd; border: 1px solid #e6c87a; padding: 10px 14px; margin: 16px 0; border-radius: 8px; }
+.banner { background: #2a2410; border: 1px solid #e6c87a; color: #ffe9a8; padding: 10px 14px; margin: 16px 0; border-radius: 8px; }
 .catgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 14px 0 24px; }
 .tile { display: block; position: relative; border-radius: 12px; overflow: hidden; min-height: 190px; background: #222; color: #fff; text-decoration: none; background-size: cover; background-position: center; }
 .tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.82), rgba(0,0,0,.15) 60%); }
@@ -43,25 +43,25 @@ header nav a.deals { color: #ff4d42; }
 .tile h3 { margin: 0; font-size: 22px; text-transform: uppercase; }
 .tile p { margin: 2px 0 0; color: #ddd; font-size: 14px; }
 .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }
-.filters { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; position: static; width: 230px; max-width: 100%; overflow: hidden; }
+.filters { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 14px; position: static; width: 230px; max-width: 100%; overflow: hidden; color: #e8e8e8; }
 .filters h3 { margin: 0 0 8px; font-size: 15px; }
 .filters label { display: block; margin: 6px 0; font-size: 14px; overflow: hidden; }
-.filters select { display: block; width: 100%; max-width: 100%; margin: 4px 0; padding: 6px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.filters select { display: block; width: 100%; max-width: 100%; margin: 4px 0; padding: 6px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #222; color: #eee; border: 1px solid #444; }
 .filters input[type=checkbox] { margin-right: 6px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
-.card img { width: 100%; height: 150px; object-fit: contain; background: #f0ede6; border-radius: 6px; }
+.card { background: #1e1e1e; border: 1px solid #333; border-radius: 10px; padding: 14px; color: #e8e8e8; }
+.card img { width: 100%; height: 150px; object-fit: contain; background: #f5f2ea; border-radius: 6px; }
 .card h3 { font-size: 16px; margin: 10px 0 4px; }
-.card h3 a { text-decoration: none; color: #1f1a14; }
+.card h3 a { text-decoration: none; color: #fff; }
 .price { font-size: 19px; font-weight: 700; margin: 6px 0; color: #b81e24; }
 .instock { color: #1f6b2e; font-weight: 700; }
 .outstock { color: #9a2b2b; font-weight: 700; }
-.meta { color: #666; font-size: 13px; }
-.specs { width: 100%; border-collapse: collapse; background: #fff; }
-.specs th, .specs td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #e5e2da; }
-.specs th { width: 180px; color: #555; }
+.meta { color: #aaa; font-size: 13px; }
+.specs { width: 100%; border-collapse: collapse; background: #1e1e1e; color: #e8e8e8; }
+.specs th, .specs td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #333; }
+.specs th { width: 180px; color: #aaa; }
 .ffl { background: #eef4ee; border: 1px solid #b7d0b7; padding: 12px 14px; border-radius: 8px; margin: 14px 0; }
-.seo { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 18px 20px; margin: 24px 0; }
+.seo { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 18px 20px; margin: 24px 0; color: #e8e8e8; }
 .seo h2 { margin-top: 0; }
 footer { background: #111; color: #d8d2c4; padding: 28px 20px; font-size: 14px; margin-top: 24px; }
 footer .cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
@@ -90,4 +90,29 @@ footer .fine { border-top: 1px solid #333; margin-top: 18px; padding-top: 12px; 
   .catgrid { grid-template-columns: 1fr; }
   .headcontact { text-align: left; margin-left: 0; }
   .searchbar { flex-direction: column; }
+}
+
+/* PSA-style layout (2026-10-25): header search, category mosaic, trending
+   chips, deal tiles. Structure inspired by PSA; all content/branding is XL Arms. */
+.headsearch { flex: 1; max-width: 640px; display: flex; }
+.headsearch input { flex: 1; padding: 12px; font-size: 16px; border: 0; border-radius: 8px 0 0 8px; }
+.headsearch button { background: #d8232a; color: #fff; border: 0; padding: 12px 18px; border-radius: 0 8px 8px 0; font-size: 16px; cursor: pointer; font-weight: 700; }
+header nav a.deals { background: #d8232a; color: #fff; padding: 4px 14px; border-radius: 20px; }
+.mosaic { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; margin: 18px 0 0; }
+.mosaic .big { min-height: 360px; }
+.mosaic-stack { display: grid; gap: 14px; }
+.mosaic-stack .tile { min-height: 173px; }
+.mosaic-bottom { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+.trend { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 12px 16px; margin: 16px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.trend a { color: #fff; background: #2a2a2a; border: 1px solid #444; padding: 5px 12px; border-radius: 20px; text-decoration: none; font-size: 14px; }
+.dealsrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 24px 0; }
+.dealtile { background: #1a1a1a; border: 1px solid #333; border-left: 4px solid #d8232a; border-radius: 10px; padding: 18px; color: #e8e8e8; text-decoration: none; }
+.dealtile h3 { margin: 0 0 6px; color: #fff; text-transform: uppercase; font-size: 17px; }
+.dealtile p { margin: 0; color: #bbb; }
+.card:hover { box-shadow: 0 8px 24px rgba(0,0,0,.5); border-color: #555; }
+@media (max-width: 760px) {
+  .headsearch { order: 3; max-width: 100%; }
+  .mosaic { grid-template-columns: 1fr; }
+  .mosaic .big { min-height: 220px; }
+  .mosaic-bottom, .dealsrow { grid-template-columns: 1fr; }
 }
