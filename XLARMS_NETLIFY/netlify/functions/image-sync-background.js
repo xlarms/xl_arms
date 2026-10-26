@@ -52,6 +52,10 @@
 //   ?prefix=aa        with ?shard= or ?skus=: only SKUs starting with that
 //                     prefix (splits a shard into small batches that fit
 //                     the 15-minute background cap).
+//   Progress is saved every 200 SKUs (with a progress log line, so the
+//   log visibly advances instead of staying quiet). In hi-only mode,
+//   SKUs whose hi is already recorded are skipped, so re-triggering a
+//   timed-out hi pass resumes instead of restarting.
 //
 // Env vars (Jonathan sets these in Netlify; NEVER in chat or code):
 //   RSR_FTP_*            (already set for the catalog importer)
@@ -230,14 +234,35 @@ exports.handler = async (event) => {
     const manifest = await loadManifest(blobs);
     manifest.prefix = prefix;
     manifest.hiPrefix = hiPrefix;
+    const saveManifest = async () => {
+      manifest.generated = new Date().toISOString();
+      await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
+    };
 
     const results = [];
     let consecutiveDlErrors = 0;
     let abortErr = null;
     let sampleDlError = null;
-    for (const sku of skus) {
+    for (let idx = 0; idx < skus.length; idx++) {
+      const sku = skus[idx];
+      // Progress + periodic save: a timeout then loses at most the last
+      // batch, and (in hi-only mode, via the skip below) the next run
+      // resumes instead of restarting. Also ends the "quiet log" problem.
+      if (idx > 0 && idx % 200 === 0) {
+        await saveManifest();
+        console.log('Image sync progress', JSON.stringify({ hiOnly, processed: idx, skusTotal: skus.length, synced: results.filter((r) => r.status === 'ok').length }));
+      }
       try {
         const shard = imageShard(sku);
+        // Hi-only resume: hi already recorded for this SKU — nothing to do.
+        if (hiOnly) {
+          const done = manifest.images[sku];
+          if (done && done.hiCount > 0) {
+            results.push({ sku, status: 'already-done-hi', hiCount: done.hiCount });
+            consecutiveDlErrors = 0;
+            continue;
+          }
+        }
         const sizes = [];
         // Hi-only mode skips standard downloads entirely (the drive
         // rebuild owns standard); the standard side is preserved below.
@@ -317,11 +342,11 @@ exports.handler = async (event) => {
       }
     }
 
-    manifest.generated = new Date().toISOString();
-    await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
+    await saveManifest();
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Image sync OK', JSON.stringify({
       prefix, hiPrefix, hiOnly, skusAttempted: skus.length, synced: ok.length,
+      skippedAlreadyDoneHi: results.filter((r) => r.status === 'already-done-hi').length,
       images: ok.reduce((a, r) => a + r.count, 0),
       hiImages: ok.reduce((a, r) => a + (r.hiCount || 0), 0),
       noImages: results.filter((r) => r.status === 'no-images-on-ftp').map((r) => r.sku),
