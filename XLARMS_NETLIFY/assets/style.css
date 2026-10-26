@@ -60,7 +60,12 @@ header nav a.deals { color: #ff4d42; }
 .specs { width: 100%; border-collapse: collapse; background: #1e1e1e; color: #e8e8e8; }
 .specs th, .specs td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #333; }
 .specs th { width: 180px; color: #aaa; }
-.ffl { background: #eef4ee; border: 1px solid #b7d0b7; padding: 12px 14px; border-radius: 8px; margin: 14px 0; }
+.ffl { background: #eef4ee; border: 1px solid #b7d0b7; padding: 12px 14px; border-radius: 8px; margin: 14px 0; color: #1e3a1e; } /* dark text: the old rule set no color, so it inherited near-white body text and was unreadable on the pale green */
+/* Product page card is white on a dark-themed site, so its inherited text must
+   be dark too — otherwise the description and headings render near-white on
+   white and are barely visible (reported 2026-10-26). */
+#product { color: #1f1a14; }
+#product a { color: #b81e24; }
 .seo { background: #1a1a1a; border: 1px solid #333; border-radius: 10px; padding: 18px 20px; margin: 24px 0; color: #e8e8e8; }
 .seo h2 { margin-top: 0; }
 footer { background: #111; color: #d8d2c4; padding: 28px 20px; font-size: 14px; margin-top: 24px; }
