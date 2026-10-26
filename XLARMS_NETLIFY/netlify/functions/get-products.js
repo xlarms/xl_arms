@@ -32,8 +32,35 @@ function cleanCaliber(cal) {
   if (/^410\s*bore/i.test(first)) return '410 Bore';
   return first;
 }
+const JUNK_CALIBERS = new Set(['barrels', 'rings', 'synthetic', 'walnut', 'weaver', 'wood', 'modern sporting rifles', 'multi', 'n/a']);
+function cleanCaliberValue(cal) {
+  const c = cleanCaliber(cal);
+  if (!c) return '';
+  if (/\.jpg$/i.test(c) || c.includes('_')) return ''; // image filenames leaking into caliber
+  const low = c.toLowerCase();
+  if (JUNK_CALIBERS.has(low)) return ''; // finish/material words, not calibers
+  if (/^[A-Za-z]{2,}-[A-Za-z0-9-]+$/.test(c)) return ''; // SKU-like codes: PYTHON-BP4WTS, XD940-4, ACC-FIX-BARREL-8.6-8IN
+  if (/^[A-Za-z]+\d[A-Za-z0-9]*$/.test(c)) return ''; // A10SBF2, DB1721K001
+  if (/^\d{3,}[A-Za-z]+\d+$/.test(c)) return ''; // 1784V001
+  return c;
+}
 function cleanProduct(p) {
-  return { ...p, category: cleanCategory(p.category), caliber: cleanCaliber(p.caliber) };
+  return {
+    ...p,
+    category: cleanCategory(p.category),
+    caliber: cleanCaliberValue(p.caliber),
+    // Brand values that are image filenames (feed pollution) are not brands.
+    brand: /\.jpg$/i.test(p.brand || '') ? '' : p.brand,
+  };
+}
+// Caliber normalisation for FILTER matching (not display): 9MM, 9mm Luger,
+// 9x19 and 9x19mm are the same caliber, as are 556NATO and 5.56. The old
+// code compared the raw display string, so picking "9MM" missed every
+// pistol whose caliber was recorded as "9mm Luger".
+function normCaliber(s) {
+  let t = String(s || '').toLowerCase().replace(/×/g, 'x').replace(/[\s.]/g, '');
+  const map = { '9x19': '9mm', '9x19mm': '9mm', '9mmluger': '9mm', '9mmparabellum': '9mm', '556x45': '556', '556nato': '556', '223rem': '223', '223remington': '223', '12gauge': '12ga', '20gauge': '20ga', '410bore': '410' };
+  return map[t] || t;
 }
 
 const SYNONYMS = { g19: ['glock', '19'], g17: ['glock', '17'], '9x19': ['9mm'], 9: ['9mm'] };
@@ -50,18 +77,24 @@ function tokens(q) {
   return [...new Set(out)];
 }
 function score(p, toks, raw) {
-  const hay = [p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical, p.sku, p.upc].join(' ').toLowerCase();
   if (raw && (String(p.sku).toLowerCase() === raw || String(p.upc) === raw)) return 1000;
-  if (toks.length && toks.every((t) => hay.includes(t))) {
+  // Word-boundary matching on brand/model/title/category/caliber only.
+  // The old substring match on the whole haystack (including SKU/UPC) let
+  // "19" match inside a UPC like 813119... and outrank real Glock 19 items.
+  const words = new Set([p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical].join(' ').toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean));
+  const has = (t) => words.has(String(t).replace(/\./g, ''));
+  const normToks = toks.map((t) => String(t).replace(/\./g, ''));
+  if (toks.length && toks.every(has)) {
     let s = 500;
-    if (hay.includes((p.brand + ' ' + p.model).toLowerCase())) s += 100;
+    const bmWords = (p.brand + ' ' + p.model).toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean);
+    if (bmWords.length && bmWords.every((w) => normToks.includes(w))) s += 100;
     const modelFirst = (p.model || '').split(/\s+/)[0].toLowerCase();
-    if (modelFirst && toks.includes(modelFirst)) s += 80;
+    if (modelFirst && normToks.includes(modelFirst)) s += 80;
     if (p.stock_qty > 0) s += 50;
     return s;
   }
   if (!toks.length) return p.stock_qty > 0 ? 50 : 0;
-  const matched = toks.filter((t) => hay.includes(t)).length;
+  const matched = toks.filter(has).length;
   if (matched === 0) return 0;
   return matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
@@ -87,16 +120,17 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: found ? [found] : [], total: found ? 1 : 0, page: 1, pageSize: 1 }) };
     }
     let items = all;
-    if (q.category) items = items.filter((p) => p.category === q.category);
-    if (q.brand) items = items.filter((p) => p.brand === q.brand);
-    if (q.caliber) items = items.filter((p) => p.caliber === q.caliber);
+    const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    if (q.category) items = items.filter((p) => eq(p.category, q.category));
+    if (q.brand) items = items.filter((p) => eq(p.brand, q.brand));
+    if (q.caliber) items = items.filter((p) => normCaliber(p.caliber) === normCaliber(q.caliber) || normCaliber(p.caliber_canonical) === normCaliber(q.caliber) || eq(p.caliber, q.caliber));
     if (q.inStock === '1' || q.inStock === 'true') items = items.filter((p) => p.stock_qty > 0);
     const raw = (q.q || '').trim().toLowerCase();
     const toks = raw ? tokens(raw) : [];
     if (raw) {
       items = items.map((p) => ({ p, s: score(p, toks, raw) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
-    } else if (q.sort === 'price-asc') items = [...items].sort((a, b) => a.price - b.price);
-    else if (q.sort === 'price-desc') items = [...items].sort((a, b) => b.price - a.price);
+    } else if (q.sort === 'price-asc') items = [...items].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
+    else if (q.sort === 'price-desc') items = [...items].sort((a, b) => (b.price || 0) - (a.price || 0));
     else items = [...items].sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
     const total = items.length;
     const pageSize = Math.min(Math.max(parseInt(q.limit, 10) || 48, 1), 100);

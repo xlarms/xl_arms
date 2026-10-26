@@ -19,18 +19,24 @@ function tokens(q) {
   return [...new Set(out)];
 }
 function score(p, toks, raw) {
-  const hay = [p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical, p.sku, p.upc].join(' ').toLowerCase();
   if (raw && (String(p.sku).toLowerCase() === raw || String(p.upc) === raw)) return 1000;
-  if (toks.length && toks.every((t) => hay.includes(t))) {
+  // Word-boundary matching on brand/model/title/category/caliber only —
+  // a token must be a whole word, not a substring of a UPC (e.g. "19"
+  // inside 813119... used to outrank real Glock 19 items).
+  const words = new Set([p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical].join(' ').toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean));
+  const has = (t) => words.has(String(t).replace(/\./g, ''));
+  const normToks = toks.map((t) => String(t).replace(/\./g, ''));
+  if (toks.length && toks.every(has)) {
     let s = 500;
-    if (hay.includes((p.brand + ' ' + p.model).toLowerCase())) s += 100;
+    const bmWords = (p.brand + ' ' + p.model).toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean);
+    if (bmWords.length && bmWords.every((w) => normToks.includes(w))) s += 100;
     const modelFirst = (p.model || '').split(/\s+/)[0].toLowerCase();
-    if (modelFirst && toks.includes(modelFirst)) s += 80;
+    if (modelFirst && normToks.includes(modelFirst)) s += 80;
     if (p.stock_qty > 0) s += 50;
     return s;
   }
   if (!toks.length) return p.stock_qty > 0 ? 50 : 0;
-  const matched = toks.filter((t) => hay.includes(t)).length;
+  const matched = toks.filter(has).length;
   return matched === 0 ? 0 : matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
 function money(n) { return '$' + Number(n).toFixed(2); }
@@ -118,7 +124,7 @@ function card(p) {
     <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}"></a>
     <h3><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title}</a></h3>
     <div class="meta">${p.brand} · ${p.category}${p.caliber ? ' · ' + p.caliber : ''}</div>
-    <div class="price">${money(p.price)}</div>
+    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
     <div>${stock}</div>${ffl}
     <button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>
   </article>`;
@@ -163,7 +169,7 @@ async function initShop() {
       countEl.textContent = data.total + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${data.page} of ${totalPages}` : '');
       listEl.innerHTML = data.products.length
         ? data.products.map(card).join('')
-        : `<div class="banner"><strong>No exact match.</strong> Try a brand + model (e.g. Glock 19), a SKU, or a caliber.</div>`;
+        : `<div class="banner"><strong>No products match.</strong> ${(qEl.value || '').trim() ? 'Try a brand + model (e.g. Glock 19), a SKU, or a caliber.' : 'Try removing a filter — brand, caliber, or “In stock only” — to widen the results.'}</div>`;
       const sugg = document.getElementById('suggestions');
       if (sugg) {
         const raw = (qEl.value || '').trim();
@@ -190,9 +196,10 @@ async function initShop() {
     const raw = (qEl.value || '').trim().toLowerCase();
     const toks = raw ? tokens(raw) : [];
     let items = fallbackProducts.filter((p) => {
-      if (catEl.value && p.category !== catEl.value) return false;
-      if (brandEl.value && p.brand !== brandEl.value) return false;
-      if (calEl.value && p.caliber !== calEl.value) return false;
+      const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      if (catEl.value && !eq(p.category, catEl.value)) return false;
+      if (brandEl.value && !eq(p.brand, brandEl.value)) return false;
+      if (calEl.value && !eq(p.caliber, calEl.value)) return false;
       if (stockEl.checked && p.stock_qty <= 0) return false;
       return true;
     });
@@ -314,7 +321,7 @@ async function initProduct() {
     <p><a href="index.html">← Back to shop</a></p>
     <h2>${p.title}</h2>
     <img src="${p.images[0]}" alt="${p.title}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px">
-    <div class="price">${money(p.price)}</div><div>${stock}</div>${ffl}
+    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
     <p><button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a></p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>

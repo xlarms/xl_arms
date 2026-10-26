@@ -51,14 +51,26 @@ const STATE_CODES = ['AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI'
 // Split one delimited line, respecting double-quoted fields (sell descriptions,
 // restrictions "ALL"). Returns raw field strings, quotes stripped, NOT trimmed
 // inside quoted text (a feature bullet keeps its own punctuation).
+// QUOTE RULE (fixed 2026-10-26): a quote only OPENS a quoted field at a field
+// boundary (start of line, or right after a delimiter), and only CLOSES one
+// when followed by a delimiter or end of line. A mid-field quote is a literal
+// inch mark (e.g. 3.41" barrel) and must NOT toggle quoting: the old code
+// toggled on any quote, so the inch mark in a firearm description swallowed
+// every following semicolon, collapsed the row to 14 fields, and
+// parseInventory's "fewer than 15 fields, skip" rule silently dropped the
+// product. That is why Glock pistols — and any product with an inch mark in
+// its description — never made it into the catalog, while holsters did.
 function splitLine(line, delimiter) {
   const out = [];
   let cur = '', inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
-      else inQuotes = !inQuotes;
+    if (ch === '"' && !inQuotes && cur === '') {
+      inQuotes = true; // quote at a field boundary: opens a quoted field
+    } else if (ch === '"' && inQuotes) {
+      if (line[i + 1] === '"') { cur += '"'; i++; } // escaped quote inside quoted field
+      else if (line[i + 1] === delimiter || i + 1 === line.length) inQuotes = false; // closes
+      else cur += '"'; // stray quote inside a quoted field: keep literally
     } else if (ch === delimiter && !inQuotes) {
       out.push(cur); cur = '';
     } else cur += ch;
