@@ -42,6 +42,16 @@
 //   ?shard=g          list /ftp_images/rsr_number/g/ and sync every SKU in
 //                     that shard (the full-sync building block — run shards
 //                     one at a time, never all 30k products at once).
+//   ?hi-only=1        with ?skus= or ?shard=: download ONLY the high-res
+//                     mirrors (standard is owned by the drive rebuild).
+//                     For ?shard= the HI tree is listed, so only SKUs that
+//                     actually have hi files are attempted. Existing
+//                     standard entries are preserved and existing hi
+//                     entries are kept when a pass finds no new hi, so hi
+//                     passes and drive rebuilds merge in either order.
+//   ?prefix=aa        with ?shard= or ?skus=: only SKUs starting with that
+//                     prefix (splits a shard into small batches that fit
+//                     the 15-minute background cap).
 //
 // Env vars (Jonathan sets these in Netlify; NEVER in chat or code):
 //   RSR_FTP_*            (already set for the catalog importer)
@@ -146,6 +156,7 @@ exports.handler = async (event) => {
   let ftp = null;
   try {
     const qs = event.queryStringParameters || {};
+    const hiOnly = qs['hi-only'] === '1';
     const prefix = process.env.WASABI_PREFIX || 'products';
     const hiPrefix = process.env.WASABI_HI_PREFIX || (prefix + '-hi');
     const hostname = process.env.BUNNY_HOSTNAME || '';
@@ -188,16 +199,25 @@ exports.handler = async (event) => {
       skus = qs.skus.split(',').map((s) => s.trim()).filter(Boolean);
     } else if (qs.shard) {
       const shard = String(qs.shard).toLowerCase();
-      const list = await ftp.list(`ftp_images/rsr_number/${shard}/`);
+      // Hi-only mode lists the HI tree (files are <SKU>_<n>_HR.jpg), so
+      // only SKUs that actually have high-res are attempted.
+      const tree = hiOnly ? 'ftp_highres_images' : 'ftp_images';
+      const pattern = hiOnly ? /^(.+?)_\d+_HR\.jpg$/i : /^(.+?)_\d+\.jpg$/i;
+      const list = await ftp.list(`${tree}/rsr_number/${shard}/`);
       const found = new Set();
       for (const entry of list) {
-        const m = String(entry.name || '').match(/^(.+?)_\d+\.jpg$/i);
+        const m = String(entry.name || '').match(pattern);
         if (m) found.add(m[1]);
       }
       skus = [...found].sort();
     } else {
       const def = process.env.IMAGE_SYNC_TEST_SKUS || 'GLUI4350201';
       skus = def.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    // Optional batch split: only SKUs starting with this prefix.
+    if (qs.prefix) {
+      const p = String(qs.prefix).toLowerCase();
+      skus = skus.filter((s) => s.toLowerCase().startsWith(p));
     }
 
     let blobs;
@@ -217,7 +237,9 @@ exports.handler = async (event) => {
       try {
         const shard = imageShard(sku);
         const sizes = [];
-        for (let n = 1; n <= MAX_IMAGES_PER_SKU; n++) {
+        // Hi-only mode skips standard downloads entirely (the drive
+        // rebuild owns standard); the standard side is preserved below.
+        for (let n = 1; !hiOnly && n <= MAX_IMAGES_PER_SKU; n++) {
           const remote = `ftp_images/rsr_number/${shard}/${sku}_${n}.jpg`;
           let buf;
           try {
@@ -255,10 +277,16 @@ exports.handler = async (event) => {
           }));
           hiSizes.push(buf.length);
         }
-        if (sizes.length === 0) { consecutiveDlErrors = 0; results.push({ sku, status: 'no-images-on-ftp' }); continue; }
         const prev = manifest.images[sku];
-        const changed = !!prev && JSON.stringify(prev.sizes || []) !== JSON.stringify(sizes);
-        const hiChanged = !!prev && (prev.hiCount || 0) > 0 && JSON.stringify(prev.hiSizes || []) !== JSON.stringify(hiSizes);
+        // Effective sides: hi-only mode preserves the standard side (owned
+        // by the drive rebuild) and keeps existing hi when a pass finds no
+        // new hi, so the two tracks merge in either order. In normal mode
+        // these are exactly the freshly downloaded sides.
+        const effSizes = (hiOnly && prev && prev.sizes) ? prev.sizes : sizes;
+        const effHiSizes = (hiOnly && hiSizes.length === 0 && prev && prev.hiSizes) ? prev.hiSizes : hiSizes;
+        if (effSizes.length === 0 && effHiSizes.length === 0) { consecutiveDlErrors = 0; results.push({ sku, status: 'no-images-on-ftp' }); continue; }
+        const changed = !!prev && JSON.stringify(prev.sizes || []) !== JSON.stringify(effSizes);
+        const hiChanged = !!prev && (prev.hiCount || 0) > 0 && JSON.stringify(prev.hiSizes || []) !== JSON.stringify(effHiSizes);
         let purge = 'n/a (new SKU, nothing cached yet)';
         if (changed) {
           try { purge = await bunnyPurgePrefix(hostname, prefix, sku); }
@@ -269,8 +297,8 @@ exports.handler = async (event) => {
           try { hiPurge = await bunnyPurgePrefix(hostname, hiPrefix, sku); }
           catch (e) { hiPurge = `FAILED (logged, sync continues): ${e.message}`; }
         }
-        manifest.images[sku] = { count: sizes.length, sizes, hiCount: hiSizes.length, hiSizes };
-        results.push({ sku, status: 'ok', count: sizes.length, changed, purge, hiCount: hiSizes.length, hiChanged, hiPurge });
+        manifest.images[sku] = { count: effSizes.length, sizes: effSizes, hiCount: effHiSizes.length, hiSizes: effHiSizes };
+        results.push({ sku, status: 'ok', count: effSizes.length, changed, purge, hiCount: effHiSizes.length, hiChanged, hiPurge });
         consecutiveDlErrors = 0;
       } catch (e) {
         results.push({ sku, status: 'error', error: e.message });
@@ -291,7 +319,7 @@ exports.handler = async (event) => {
     await blobs.getStore('xl-arms-catalog').set('images.json', JSON.stringify(manifest));
     const ok = results.filter((r) => r.status === 'ok');
     console.log('Image sync OK', JSON.stringify({
-      prefix, hiPrefix, skusAttempted: skus.length, synced: ok.length,
+      prefix, hiPrefix, hiOnly, skusAttempted: skus.length, synced: ok.length,
       images: ok.reduce((a, r) => a + r.count, 0),
       hiImages: ok.reduce((a, r) => a + (r.hiCount || 0), 0),
       noImages: results.filter((r) => r.status === 'no-images-on-ftp').map((r) => r.sku),
