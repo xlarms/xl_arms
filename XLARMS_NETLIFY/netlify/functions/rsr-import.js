@@ -302,19 +302,24 @@ function parseDeleted(text) {
 }
 
 // --- Join: one normalized product per inventory SKU. Full catalog, no exclusions. ---
-function buildCatalog(files) {
+// MEMORY (slimmed 2026-10-26, was peaking at 1,018 MB vs Netlify's 1,024 MB
+// default): (a) the search index is built ONLY when opts.searchIndex is set —
+// the background importer never publishes it, so building it by default was
+// pure waste; (b) each raw FTP string is released (files.<key> = '') right
+// after parsing, instead of holding ~90 MB of raw text for the whole run.
+function buildCatalog(files, opts = {}) {
   const errors = [];
-  const inventory = parseInventory(files.inventory || '');
+  const inventory = parseInventory(files.inventory || ''); files.inventory = '';
   if (inventory.size === 0) throw new Error('Inventory is empty or unreadable — aborting, live catalog kept.');
-  const attributesAll = parseAttributes(files.attributesAll || '');
-  const attributes = parseAttributes(files.attributes || '');
-  const xref = parseXref(files.xref || '');
-  const restrictions = parseRestrictions(files.restrictions || '');
-  const messages = parseMessages(files.messages || '');
-  const retailMap = parseRetailMap(files.retailMap || '');
-  const sell = parseSellDescriptions(files.sellDescriptions || '');
-  const deleted = parseDeleted(files.deleted || '');
-  const newSkus = files.newSkus ? linesOf(files.newSkus).map(clean).filter(Boolean) : [];
+  const attributesAll = parseAttributes(files.attributesAll || ''); files.attributesAll = '';
+  const attributes = parseAttributes(files.attributes || ''); files.attributes = '';
+  const xref = parseXref(files.xref || ''); files.xref = '';
+  const restrictions = parseRestrictions(files.restrictions || ''); files.restrictions = '';
+  const messages = parseMessages(files.messages || ''); files.messages = '';
+  const retailMap = parseRetailMap(files.retailMap || ''); files.retailMap = '';
+  const sell = parseSellDescriptions(files.sellDescriptions || ''); files.sellDescriptions = '';
+  const deleted = parseDeleted(files.deleted || ''); files.deleted = '';
+  const newSkus = files.newSkus ? linesOf(files.newSkus).map(clean).filter(Boolean) : []; files.newSkus = '';
 
   const products = [];
   let hidden = 0, outOfStock = 0, noMapFlagged = 0;
@@ -365,18 +370,20 @@ function buildCatalog(files) {
       isNew: newSkus.includes(rsr),
     });
   }
-  // Search index: exact SKU/UPC first, then brand+model, then all-terms narrowing.
-  // A search must narrow, not widen. Caliber synonyms are canonicalised, never substituted.
-  const searchIndex = products.map((p) => ({
+  // Search index (opt-in only, see header note): exact SKU/UPC first, then
+  // brand+model, then all-terms narrowing. A search must narrow, not widen.
+  // Caliber synonyms are canonicalised, never substituted.
+  const searchIndex = opts.searchIndex ? products.map((p) => ({
     sku: p.sku, upc: p.upc, title: p.title, brand: p.brand, model: p.model,
     department: p.departmentName,
     tokens: [...new Set(`${p.title} ${p.brand} ${p.model} ${p.sku} ${p.upc} ${(p.attributes?.caliber || []).join(' ')} ${(p.attributes?.fit || []).join(' ')}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))],
     inStock: p.inStock, price: p.price,
-  }));
+  })) : undefined;
+  const dealers = parseFFL(files.ffl || ''); files.ffl = '';
   return {
     generatedAt: new Date().toISOString(),
     stats: { totalInventory: inventory.size, published: products.length, hidden, outOfStock, noMapFlagged },
-    products, dealers: parseFFL(files.ffl || ''), searchIndex, errors,
+    products, dealers, searchIndex, errors,
   };
 }
 

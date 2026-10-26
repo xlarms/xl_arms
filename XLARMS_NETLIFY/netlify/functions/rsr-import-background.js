@@ -39,8 +39,10 @@ const DATA_FILES = {
   ffl: 'ffl-transfer-dealers.txt',
   deleted: 'rsrdeletedinv.txt',
   newSkus: 'IM-NEW-SKUS.csv',
-  // Reference only — never merged into storefront stock (Jonathan: main inventory only).
-  fulfillment: 'fulfillment-inv-new.txt',
+  // NOTE (slimmed 2026-10-26): fulfillment-inv-new.txt is INTENTIONALLY not
+  // downloaded. It is reference-only, buildCatalog never parses it (Jonathan:
+  // main inventory only), and downloading it cost ~7 MB of memory plus FTP
+  // time on every run. Re-add it here if a future step ever needs it.
 };
 
 async function downloadAll() {
@@ -97,13 +99,15 @@ exports.handler = async (event) => {
     // — exactly the 2026-10-25 19:20 failure. Do NOT pass siteID/token to
     // getStore() in code running on Netlify; that replaces the provided creds.
     try { require('@netlify/blobs').connectLambda(event); } catch (e) { console.warn('connectLambda skipped:', e.message); }
-    const files = await downloadAll();
-    const catalog = buildCatalog(files);
+    let files = await downloadAll();
+    let catalog = buildCatalog(files);
     // Validation gate: never publish a collapsed catalog. A sudden 90%+ drop in
     // published products, or an empty inventory, aborts the run and keeps yesterday's live catalog.
     // (The caller / store writer must implement the "keep old catalog" side — this
     // function throws instead of returning a catalog to publish.)
     if (catalog.stats.published === 0) throw new Error('Published product count is 0 — aborting, live catalog kept.');
+    const stats = catalog.stats;
+    const importErrors = catalog.errors;
     // Publish to Netlify Blobs — the ONLY store get-products.js reads for the
     // live shop. Writing here is atomic for this key: the old catalog stays
     // live until this write succeeds, and a failed run never blanks the shop.
@@ -118,14 +122,19 @@ exports.handler = async (event) => {
     }
     const store = blobs.getStore('xl-arms-catalog');
     const storefront = toStorefrontCatalog(catalog);
+    // MEMORY (slimmed 2026-10-26): release the heavy internal catalog and the
+    // raw files BEFORE stringifying/publishing. Holding both the internal
+    // catalog and the storefront copy at once was a large share of the
+    // ~1,018 MB peak; the storefront array is all the shop needs.
+    catalog = null; files = null;
     await store.set('products.json', JSON.stringify(storefront));
     // NOTE: the full internal catalog (restrictions, messages, search index)
     // is intentionally NOT written as a second giant Blob here — the first
     // successful run already used 705 MB holding both copies in memory.
     // Restrictions/messages will be stored separately (per-SKU or as a
     // compact file) when checkout is built; the shop only needs products.json.
-    console.log('RSR import OK', JSON.stringify(catalog.stats), 'errors:', catalog.errors.slice(0, 20));
-    return { statusCode: 202, body: JSON.stringify({ ok: true, stats: catalog.stats, note: 'Background import started — check Functions log for RSR import OK, then reload the shop.' }) };
+    console.log('RSR import OK', JSON.stringify(stats), 'errors:', importErrors.slice(0, 20));
+    return { statusCode: 202, body: JSON.stringify({ ok: true, stats, note: 'Background import started — check Functions log for RSR import OK, then reload the shop.' }) };
   } catch (e) {
     console.error('RSR import FAILED — live catalog kept:', e.message);
     return { statusCode: 202, body: JSON.stringify({ ok: false, error: e.message }) };
