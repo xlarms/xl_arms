@@ -1,0 +1,12 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/products"
+  to = "/.netlify/functions/get-products"
+  status = 200
+
+# Importer is a background function, not a page route.
+# It must be triggered on a schedule (see the background importer function).
+# Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.
