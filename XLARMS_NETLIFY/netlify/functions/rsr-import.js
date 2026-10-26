@@ -405,6 +405,13 @@ function toStorefrontProduct(p) {
     action: a.action || '', barrel_in: Number.isFinite(barrelIn) ? barrelIn : null,
     capacity: a.capacity ? intVal(a.capacity) : null,
     finish: (a.finish || []).join(', '),
+    // Detailed-filter fields (sidebar, added 2026-10-26): published so the
+    // shop API can filter/facet on them. Until the next re-import these are
+    // absent from the live catalog and their sidebar groups stay hidden.
+    type: a.type || '', subCategory: a.subCategory || '', frame: a.frame || '',
+    grips: a.grips || '', color: a.color || '', material: a.material || '',
+    size: a.size || '', date_entered: p.dateEntered || '',
+    closeout: String(p.statusFlag || '').toLowerCase() === 'closeout',
     price: p.price, stock_qty: p.stock, is_firearm: FIREARM_DEPARTMENTS.has(p.department),
     description: p.sellcopy || p.description || '',
     features: p.features || [], prop65: p.prop65, prop65Message: p.prop65Message || null,

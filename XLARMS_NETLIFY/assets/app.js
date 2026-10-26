@@ -168,6 +168,97 @@ function card(p) {
     ${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${sku}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
   </article>`;
 }
+// ---- Detailed-filter sidebar (shop + category pages, added 2026-10-26) ----
+// One value per facet group; checkboxes behave like radios (click a checked
+// box to clear it). Groups with no facet values are skipped — this is what
+// keeps new-attribute groups hidden until the re-import that publishes them.
+// The sidebar only rebuilds when the facet lists actually change, so typing
+// in a price box never loses focus to a rebuild.
+const SIDEBAR_GROUPS = [
+  { key: 'brand', label: 'Manufacturer', facet: 'brands' },
+  { key: 'caliber', label: 'Caliber', facet: 'calibers' },
+  { key: 'capacity', label: 'Capacity', facet: 'capacities' },
+  { key: 'barrel', label: 'Barrel Length', facet: 'barrels', suffix: '"' },
+  { key: 'action', label: 'Action', facet: 'actions' },
+  { key: 'type', label: 'Type', facet: 'types' },
+  { key: 'finish', label: 'Finish', facet: 'finishes' },
+  { key: 'frame', label: 'Frame', facet: 'frames' },
+  { key: 'grips', label: 'Grips', facet: 'grips' },
+  { key: 'color', label: 'Color', facet: 'colors' },
+  { key: 'material', label: 'Material', facet: 'materials' },
+  { key: 'size', label: 'Size', facet: 'sizes' },
+  { key: 'subCategory', label: 'Subcategory', facet: 'subCategories' },
+];
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function baseSidebarState() {
+  return { capacity: '', barrel: '', action: '', type: '', finish: '', frame: '', grips: '', color: '', material: '', size: '', subCategory: '', priceMin: '', priceMax: '', isNew: false, closeout: false, perPage: '48' };
+}
+function sidebarParams(state) {
+  const p = {};
+  for (const k of ['brand', 'caliber', 'capacity', 'barrel', 'action', 'type', 'finish', 'frame', 'grips', 'color', 'material', 'size', 'subCategory', 'priceMin', 'priceMax']) if (state[k]) p[k] = state[k];
+  if (state.isNew) p.isNew = '1';
+  if (state.closeout) p.closeout = '1';
+  if (state.inStock) p.inStock = '1';
+  if (state.sort && state.sort !== 'relevance') p.sort = state.sort;
+  return p;
+}
+function renderSidebar(el, facets, state, opts, onChange, onClear) {
+  if (!el || !facets) return;
+  const key = JSON.stringify(facets);
+  if (!opts.force && el._facetsKey === key && el.innerHTML) return;
+  el._facetsKey = key;
+  const groups = SIDEBAR_GROUPS.filter((g) => opts.includeBasics || (g.key !== 'brand' && g.key !== 'caliber'));
+  let html = opts.heading === false ? '' : '<h3>Filter</h3>';
+  for (const g of groups) {
+    const values = facets[g.facet] || [];
+    if (!values.length) continue;
+    html += `<details open><summary>${g.label}</summary><div class="facet-list">`;
+    for (const v of values) {
+      const val = String(v);
+      const checked = String(state[g.key] || '') === val ? ' checked' : '';
+      html += `<label><input type="checkbox" data-facet="${g.key}" value="${escHtml(val)}"${checked}> ${escHtml(val)}${g.suffix || ''}</label>`;
+    }
+    html += '</div></details>';
+  }
+  html += '<details open><summary>Price</summary><div class="price-row">'
+    + `<input type="number" min="0" data-price="min" placeholder="Min $" value="${escHtml(state.priceMin || '')}">`
+    + `<input type="number" min="0" data-price="max" placeholder="Max $" value="${escHtml(state.priceMax || '')}">`
+    + '</div></details>';
+  html += '<details open><summary>Availability</summary><div class="facet-list">';
+  if (opts.includeBasics) html += `<label><input type="checkbox" data-bool="inStock"${state.inStock ? ' checked' : ''}> In stock only</label>`;
+  html += `<label><input type="checkbox" data-bool="isNew"${state.isNew ? ' checked' : ''}> New arrivals (last 90 days)</label>`;
+  html += `<label><input type="checkbox" data-bool="closeout"${state.closeout ? ' checked' : ''}> Closeout</label>`;
+  html += '</div></details>';
+  if (opts.includeBasics) {
+    html += '<label>Sort<select data-sort><option value="relevance">Relevance / In stock first</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option><option value="newest">Newest arrivals</option></select></label>';
+  }
+  html += '<label>Per page<select data-perpage><option value="24">24 per page</option><option value="48">48 per page</option><option value="96">96 per page</option></select></label>';
+  html += '<button class="btn" data-clear style="margin-top:10px">Clear all filters</button>';
+  el.innerHTML = html;
+  const sortSel = el.querySelector('[data-sort]');
+  if (sortSel) sortSel.value = state.sort || 'relevance';
+  const perSel = el.querySelector('[data-perpage]');
+  if (perSel) perSel.value = state.perPage || '48';
+  el.querySelectorAll('[data-facet]').forEach((cb) => cb.addEventListener('change', () => {
+    const k = cb.dataset.facet;
+    if (cb.checked) {
+      el.querySelectorAll(`[data-facet="${k}"]`).forEach((o) => { if (o !== cb) o.checked = false; });
+      state[k] = cb.value;
+    } else state[k] = '';
+    onChange();
+  }));
+  el.querySelectorAll('[data-bool]').forEach((cb) => cb.addEventListener('change', () => { state[cb.dataset.bool] = cb.checked; onChange(); }));
+  el.querySelectorAll('[data-price]').forEach((inp) => inp.addEventListener('change', () => {
+    state[inp.dataset.price === 'min' ? 'priceMin' : 'priceMax'] = inp.value.trim();
+    onChange();
+  }));
+  if (sortSel) sortSel.addEventListener('change', () => { state.sort = sortSel.value; onChange(); });
+  if (perSel) perSel.addEventListener('change', () => { state.perPage = perSel.value; onChange(); });
+  const clearBtn = el.querySelector('[data-clear]');
+  if (clearBtn) clearBtn.addEventListener('click', () => onClear());
+}
 async function initShop() {
   const listEl = document.getElementById('results');
   const countEl = document.getElementById('count');
@@ -179,19 +270,29 @@ async function initShop() {
   const stockEl = document.getElementById('instock');
   const sortEl = document.getElementById('sort');
   if (!listEl) return;
-  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0;
+  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0, lastFacets = null;
+  const side = baseSidebarState();
+  function clearShopFilters() {
+    qEl.value = ''; catEl.value = ''; brandEl.value = ''; calEl.value = ''; stockEl.checked = false; sortEl.value = 'relevance';
+    Object.assign(side, baseSidebarState());
+    const detailEl = document.getElementById('detailFilters');
+    if (detailEl && lastFacets) renderSidebar(detailEl, lastFacets, side, { includeBasics: false, heading: false, force: true }, resetAndRender, clearShopFilters);
+    page = 1; render();
+  }
   function setOptions(el, values, label) {
     const cur = el.value;
     el.innerHTML = `<option value="">${label}</option>` + values.map((v) => `<option>${v}</option>`).join('');
     if (values.includes(cur)) el.value = cur;
   }
   async function render() {
-    const params = new URLSearchParams({
+    const paramObj = {
       q: qEl.value || '', category: catEl.value || '', brand: brandEl.value || '',
       caliber: calEl.value || '', inStock: stockEl.checked ? '1' : '',
-      sort: sortEl.value === 'price-asc' ? 'price-asc' : sortEl.value === 'price-desc' ? 'price-desc' : '',
-      page: String(page), limit: '48',
-    });
+      sort: ['price-asc', 'price-desc', 'newest'].includes(sortEl.value) ? sortEl.value : '',
+      page: String(page), limit: side.perPage,
+    };
+    Object.assign(paramObj, sidebarParams(side));
+    const params = new URLSearchParams(paramObj);
     const mySeq = ++renderSeq;
     let data = null;
     try {
@@ -209,8 +310,11 @@ async function initShop() {
         setOptions(calEl, data.facets.calibers, 'All calibers');
         facetsLoaded = true;
       }
+      lastFacets = data.facets || lastFacets;
+      const detailEl = document.getElementById('detailFilters');
+      if (detailEl && data.facets) renderSidebar(detailEl, data.facets, side, { includeBasics: false, heading: false }, resetAndRender, clearShopFilters);
       totalPages = Math.max(1, Math.ceil(data.total / (data.pageSize || 48)));
-      countEl.textContent = data.total + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${data.page} of ${totalPages}` : '');
+      countEl.textContent = data.total + ' product' + (data.total === 1 ? '' : 's') + (data.total > (data.pageSize || 48) ? ` — page ${data.page} of ${totalPages}` : '');
       listEl.innerHTML = data.products.length
         ? data.products.map(card).join('')
         : `<div class="banner"><strong>No products match.</strong> ${(qEl.value || '').trim() ? 'Try a brand + model (e.g. Glock 19), a SKU, or a caliber.' : 'Try removing a filter — brand, caliber, or “In stock only” — to widen the results.'}</div>`;
@@ -284,9 +388,17 @@ async function initCategoryGrid() {
   const pageEl = document.getElementById('pagination');
   const catQEl = document.getElementById('catQ');
   const catForm = document.getElementById('catSearchForm');
-  let page = 1, totalPages = 1, renderSeq = 0;
+  let page = 1, totalPages = 1, renderSeq = 0, lastFacets = null;
+  const side = Object.assign(baseSidebarState(), { brand: '', caliber: '', inStock: false, sort: 'relevance' });
+  function clearCatFilters() {
+    if (catQEl) catQEl.value = '';
+    Object.assign(side, baseSidebarState(), { brand: '', caliber: '', inStock: false, sort: 'relevance' });
+    const catFiltersEl = document.getElementById('catFilters');
+    if (catFiltersEl && lastFacets) renderSidebar(catFiltersEl, lastFacets, side, { includeBasics: true, force: true }, () => { page = 1; render(); }, clearCatFilters);
+    page = 1; render();
+  }
   async function render() {
-    const params = new URLSearchParams({ page: String(page), limit: '48' });
+    const params = new URLSearchParams({ page: String(page), limit: side.perPage });
     const mySeq = ++renderSeq;
     const userQ = catQEl ? catQEl.value.trim() : '';
     // Scoped search: on a category page, search stays INSIDE that category.
@@ -299,6 +411,7 @@ async function initCategoryGrid() {
     } else {
       params.set('q', userQ ? (holder.dataset.shopValue + ' ' + userQ) : holder.dataset.shopValue);
     }
+    for (const [k, v] of Object.entries(sidebarParams(side))) params.set(k, v);
     try {
       const res = await fetch('/api/products?' + params.toString());
       const data = await res.json();
@@ -306,8 +419,11 @@ async function initCategoryGrid() {
       // keystroke and responses can finish out of order. Only the LATEST
       // render may paint — a stale "gl" response must never overwrite "glock".
       if (mySeq !== renderSeq) return;
-      totalPages = Math.max(1, Math.ceil((data.total || 0) / 48));
-      countEl.textContent = (data.total || 0) + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${page} of ${totalPages}` : '');
+      lastFacets = data.facets || lastFacets;
+      const catFiltersEl = document.getElementById('catFilters');
+      if (catFiltersEl && data.facets) renderSidebar(catFiltersEl, data.facets, side, { includeBasics: true }, () => { page = 1; render(); }, clearCatFilters);
+      totalPages = Math.max(1, Math.ceil((data.total || 0) / parseInt(side.perPage, 10)));
+      countEl.textContent = (data.total || 0) + ' product' + (data.total === 1 ? '' : 's') + (data.total > parseInt(side.perPage, 10) ? ` — page ${page} of ${totalPages}` : '');
       listEl.innerHTML = (data.products || []).map(card).join('') || '<p>No products found in this category right now.</p>';
       if (pageEl) {
         pageEl.innerHTML = totalPages > 1 ? `<button id="prevPage" ${page <= 1 ? 'disabled' : ''}>← Previous</button> <span style="margin:0 8px">Page ${page} of ${totalPages}</span> <button id="nextPage" ${page >= totalPages ? 'disabled' : ''}>Next →</button>` : '';

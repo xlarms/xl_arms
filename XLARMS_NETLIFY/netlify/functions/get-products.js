@@ -121,27 +121,72 @@ exports.handler = async (event) => {
     }
     let items = all;
     const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    // Order matters for facets (not for results — these filters commute):
+    // category + word search first, then snapshot the facet base, then the
+    // facet filters. So facet lists reflect the current category/search
+    // instead of the whole catalog (picking Handguns no longer offers
+    // ammunition-only brands), while a chosen facet never empties its own list.
     if (q.category) items = items.filter((p) => eq(p.category, q.category));
-    if (q.brand) items = items.filter((p) => eq(p.brand, q.brand));
-    if (q.caliber) items = items.filter((p) => normCaliber(p.caliber) === normCaliber(q.caliber) || normCaliber(p.caliber_canonical) === normCaliber(q.caliber) || eq(p.caliber, q.caliber));
-    if (q.inStock === '1' || q.inStock === 'true') items = items.filter((p) => p.stock_qty > 0);
     const raw = (q.q || '').trim().toLowerCase();
     const toks = raw ? tokens(raw) : [];
     if (raw) {
       items = items.map((p) => ({ p, s: score(p, toks, raw) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
-    } else if (q.sort === 'price-asc') items = [...items].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
-    else if (q.sort === 'price-desc') items = [...items].sort((a, b) => (b.price || 0) - (a.price || 0));
-    else items = [...items].sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
+    }
+    const facetBase = items;
+    if (q.brand) items = items.filter((p) => eq(p.brand, q.brand));
+    if (q.caliber) items = items.filter((p) => normCaliber(p.caliber) === normCaliber(q.caliber) || normCaliber(p.caliber_canonical) === normCaliber(q.caliber) || eq(p.caliber, q.caliber));
+    // Detailed sidebar filters (added 2026-10-26). Fields absent from an
+    // older catalog (pre-re-import) simply match nothing for that facet.
+    if (q.action) items = items.filter((p) => eq(p.action, q.action));
+    if (q.finish) items = items.filter((p) => eq(p.finish, q.finish));
+    if (q.type) items = items.filter((p) => eq(p.type, q.type));
+    if (q.subCategory) items = items.filter((p) => eq(p.subCategory, q.subCategory));
+    if (q.frame) items = items.filter((p) => eq(p.frame, q.frame));
+    if (q.grips) items = items.filter((p) => eq(p.grips, q.grips));
+    if (q.color) items = items.filter((p) => eq(p.color, q.color));
+    if (q.material) items = items.filter((p) => eq(p.material, q.material));
+    if (q.size) items = items.filter((p) => eq(p.size, q.size));
+    if (q.capacity) items = items.filter((p) => p.capacity != null && p.capacity === parseInt(q.capacity, 10));
+    if (q.barrel) items = items.filter((p) => p.barrel_in != null && Math.abs(p.barrel_in - parseFloat(q.barrel)) < 0.001);
+    if (q.priceMin) items = items.filter((p) => (p.price || 0) >= parseFloat(q.priceMin));
+    if (q.priceMax) items = items.filter((p) => (p.price || 0) <= parseFloat(q.priceMax));
+    if (q.isNew === '1' || q.isNew === 'true') {
+      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+      items = items.filter((p) => p.date_entered && String(p.date_entered) >= cutoff);
+    }
+    if (q.closeout === '1' || q.closeout === 'true') items = items.filter((p) => p.closeout === true);
+    if (q.inStock === '1' || q.inStock === 'true') items = items.filter((p) => p.stock_qty > 0);
+    if (!raw) {
+      if (q.sort === 'price-asc') items = [...items].sort((a, b) => (a.price || Infinity) - (b.price || Infinity));
+      else if (q.sort === 'price-desc') items = [...items].sort((a, b) => (b.price || 0) - (a.price || 0));
+      else if (q.sort === 'newest') items = [...items].sort((a, b) => String(b.date_entered || '').localeCompare(String(a.date_entered || '')));
+      else items = [...items].sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
+    }
     const total = items.length;
     const pageSize = Math.min(Math.max(parseInt(q.limit, 10) || 48, 1), 100);
     const page = Math.max(parseInt(q.page, 10) || 1, 1);
     const pageProducts = items.slice((page - 1) * pageSize, page * pageSize);
-    // Facets are computed from the FULL catalog (not just this page), but
-    // they are only lists of names — a few KB, not the 6 MB catalog.
+    // Facets are value lists (not the 6 MB catalog) from the facet base
+    // above. Groups with no values are hidden by the sidebar UI — this is
+    // what keeps the new facet groups invisible until the re-import that
+    // publishes those fields.
+    const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
+    const uniqNum = (arr) => [...new Set(arr.filter((v) => v != null))].sort((a, b) => a - b);
     const facets = {
-      categories: [...new Set(all.map((p) => p.category).filter(Boolean))].sort(),
-      brands: [...new Set(all.map((p) => p.brand).filter(Boolean))].sort(),
-      calibers: [...new Set(all.map((p) => p.caliber).filter(Boolean))].sort(),
+      categories: uniq(facetBase.map((p) => p.category)),
+      brands: uniq(facetBase.map((p) => p.brand)),
+      calibers: uniq(facetBase.map((p) => p.caliber)),
+      actions: uniq(facetBase.map((p) => p.action)),
+      finishes: uniq(facetBase.map((p) => p.finish)),
+      types: uniq(facetBase.map((p) => p.type)),
+      subCategories: uniq(facetBase.map((p) => p.subCategory)),
+      frames: uniq(facetBase.map((p) => p.frame)),
+      grips: uniq(facetBase.map((p) => p.grips)),
+      colors: uniq(facetBase.map((p) => p.color)),
+      materials: uniq(facetBase.map((p) => p.material)),
+      sizes: uniq(facetBase.map((p) => p.size)),
+      capacities: uniqNum(facetBase.map((p) => p.capacity)),
+      barrels: uniqNum(facetBase.map((p) => p.barrel_in)),
     };
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: pageProducts, total, page, pageSize, facets }) };
   } catch (e) {
