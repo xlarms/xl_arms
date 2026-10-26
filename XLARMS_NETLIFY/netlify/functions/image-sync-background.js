@@ -9,7 +9,9 @@
 //      RSR FTP (stops at the first missing number; numbering is sequential).
 //   2. Upload each to Wasabi as <WASABI_PREFIX>/<SKU>/<n>.jpg.
 //   3. Download the high-res mirror /ftp_highres_images/rsr_number/<shard>/
-//      <SKU>_n.jpg (same numbering, may be fewer or absent) and upload each
+//      <SKU>_n_HR.jpg — note the _HR suffix: plain-named files do not exist
+//      in the hi tree (verified from Jonathan's FileZilla listing 2026-10-26:
+//      GLUI4350201_1_HR.jpg etc.) and upload each
 //      to Wasabi as <WASABI_HI_PREFIX>/<SKU>/<n>.jpg. The storefront uses
 //      standard images everywhere and high-res only inside the product-page
 //      lightbox, so pages stay fast while zoom gets genuinely huge.
@@ -185,7 +187,7 @@ exports.handler = async (event) => {
         // fewer hi images than standard, or none at all).
         const hiSizes = [];
         for (let n = 1; n <= MAX_IMAGES_PER_SKU; n++) {
-          const remote = `ftp_highres_images/rsr_number/${shard}/${sku}_${n}.jpg`;
+          const remote = `ftp_highres_images/rsr_number/${shard}/${sku}_${n}_HR.jpg`;
           let buf;
           try {
             buf = await downloadOne(ftp, remote);
