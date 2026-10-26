@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://xlarms.us/sitemap.xml

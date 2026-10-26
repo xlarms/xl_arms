@@ -1,25 +1,48 @@
+/* XL Arms — SEO-first redesign (2026-10-25).
+   Identity kept from the old site: black header/hero, bright red accent,
+   white/light-gray content bands, photo category tiles.
+   Fixes vs old site: real H1, readable body text (not all-dark), photo hero
+   (not flat black), full footer with contact + FFL info, mobile-first grid.
+   Product photos are placeholders until Wasabi/Bunny sync; category tiles
+   use images/categories/<name>.jpg when present, otherwise a dark gradient
+   so the tile still looks finished. */
 * { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f6f5f2; color: #1f1a14; line-height: 1.5; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f6f5f2; color: #1f1a14; line-height: 1.55; }
 a { color: #1f4d2e; }
-header { background: #1d211c; color: #fff; padding: 16px 20px; }
-header .wrap, main.wrap, footer.wrap { max-width: 1100px; margin: 0 auto; }
-header h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: .2px; }
-header p { margin: 0; color: #d8d2c4; }
-header nav { margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
-header nav a { color: #f2c94c; text-decoration: none; font-weight: 600; }
-.banner { background: #fff3cd; border: 1px solid #e6c87a; padding: 10px 14px; margin: 16px 0; border-radius: 8px; }
+.topbar { background: #000; color: #d8d2c4; font-size: 13px; }
+.topbar .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 20px; }
+.topbar a { color: #d8d2c4; text-decoration: none; margin-left: 14px; }
+header { background: #111; color: #fff; padding: 14px 20px 0; }
+header .wrap, main.wrap, footer .wrap { max-width: 1140px; margin: 0 auto; }
+.headrow { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-bottom: 14px; }
+.logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; }
+.logo img { height: 52px; width: auto; border-radius: 50%; }
+.logo .wordmark { font-weight: 900; line-height: 1; letter-spacing: .5px; }
+.logo .wordmark .xl { color: #e2231a; font-size: 28px; display: block; }
+.logo .wordmark .arms { color: #fff; font-size: 28px; display: block; }
+.headcontact { margin-left: auto; text-align: right; font-size: 14px; color: #d8d2c4; }
+.headcontact a { color: #fff; font-weight: 700; text-decoration: none; }
+header nav { display: flex; gap: 18px; flex-wrap: wrap; border-top: 1px solid #333; padding: 10px 0; }
+header nav a { color: #eee; text-decoration: none; font-weight: 700; text-transform: uppercase; font-size: 14px; }
+header nav a.deals { color: #ff4d42; }
+.hero { background: #111; color: #fff; border-radius: 12px; padding: 36px 28px; margin: 18px 0; background-image: linear-gradient(90deg, rgba(0,0,0,.92), rgba(0,0,0,.65)); /* photo hero later: add a real RSR product photo here after image sync, never the previous designer's photos */ background-size: cover; background-position: center; }
+.hero h1 { margin: 0 0 8px; font-size: 38px; line-height: 1.1; max-width: 720px; }
+.hero p { color: #d8d2c4; max-width: 680px; margin: 0 0 14px; font-size: 17px; }
+.hero .searchbar { max-width: 680px; }
 .searchbar { display: flex; gap: 8px; margin: 16px 0; }
 .searchbar input { flex: 1; padding: 12px; font-size: 16px; border: 1px solid #bbb; border-radius: 8px; }
-.searchbar button, .btn { background: #1f4d2e; color: #fff; border: 0; padding: 12px 18px; border-radius: 8px; font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
+.searchbar button, .btn { background: #d8232a; color: #fff; border: 0; padding: 12px 18px; border-radius: 8px; font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; font-weight: 700; }
+.btn-outline { background: transparent; color: #fff; border: 2px solid #fff; }
+.badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.badges span { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.35); padding: 5px 10px; border-radius: 20px; font-size: 13px; }
+.banner { background: #fff3cd; border: 1px solid #e6c87a; padding: 10px 14px; margin: 16px 0; border-radius: 8px; }
+.catgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 14px 0 24px; }
+.tile { display: block; position: relative; border-radius: 12px; overflow: hidden; min-height: 190px; background: #222; color: #fff; text-decoration: none; background-size: cover; background-position: center; }
+.tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.82), rgba(0,0,0,.15) 60%); }
+.tile .t { position: absolute; left: 16px; right: 16px; bottom: 14px; z-index: 1; }
+.tile h3 { margin: 0; font-size: 22px; text-transform: uppercase; }
+.tile p { margin: 2px 0 0; color: #ddd; font-size: 14px; }
 .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }
-/* FIX 2026-10-25: with the real 26,298-product catalog, the Category / Brand /
-   Caliber dropdowns contain very long option names. Without a width limit,
-   a <select> grows to its longest option, spills out of the 230px sidebar,
-   and draws a long bar across the product grid. Worse, the sidebar was
-   position:sticky, so those long bars stayed on screen while scrolling.
-   Fix: selects are now 100% of the sidebar (never wider), the sidebar
-   clips overflow, the grid's main column can shrink (minmax(0,1fr)), and
-   the sidebar is no longer sticky — it scrolls away with the page. */
 .filters { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; position: static; width: 230px; max-width: 100%; overflow: hidden; }
 .filters h3 { margin: 0 0 8px; font-size: 15px; }
 .filters label { display: block; margin: 6px 0; font-size: 14px; overflow: hidden; }
@@ -30,7 +53,7 @@ header nav a { color: #f2c94c; text-decoration: none; font-weight: 600; }
 .card img { width: 100%; height: 150px; object-fit: contain; background: #f0ede6; border-radius: 6px; }
 .card h3 { font-size: 16px; margin: 10px 0 4px; }
 .card h3 a { text-decoration: none; color: #1f1a14; }
-.price { font-size: 19px; font-weight: 700; margin: 6px 0; }
+.price { font-size: 19px; font-weight: 700; margin: 6px 0; color: #b81e24; }
 .instock { color: #1f6b2e; font-weight: 700; }
 .outstock { color: #9a2b2b; font-weight: 700; }
 .meta { color: #666; font-size: 13px; }
@@ -38,9 +61,33 @@ header nav a { color: #f2c94c; text-decoration: none; font-weight: 600; }
 .specs th, .specs td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #e5e2da; }
 .specs th { width: 180px; color: #555; }
 .ffl { background: #eef4ee; border: 1px solid #b7d0b7; padding: 12px 14px; border-radius: 8px; margin: 14px 0; }
-footer { padding: 24px 20px; color: #555; font-size: 14px; }
+.seo { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 18px 20px; margin: 24px 0; }
+.seo h2 { margin-top: 0; }
+footer { background: #111; color: #d8d2c4; padding: 28px 20px; font-size: 14px; margin-top: 24px; }
+footer .cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+footer h4 { color: #fff; margin: 0 0 8px; text-transform: uppercase; font-size: 14px; }
+footer a { color: #d8d2c4; text-decoration: none; display: block; margin: 4px 0; }
+footer .fine { border-top: 1px solid #333; margin-top: 18px; padding-top: 12px; font-size: 13px; }
+/* Age gate: JS-only overlay. Content underneath stays in the HTML (so it is
+   indexable), the modal just blocks interaction until confirmed. Choice is
+   remembered in localStorage for 30 days. */
+.agegate { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.agegate.hidden { display: none; }
+.agebox { background: #222; color: #fff; border-radius: 14px; padding: 32px 28px; max-width: 440px; text-align: center; }
+.agebox .shield { font-size: 44px; color: #e2231a; }
+.agebox h2 { margin: 8px 0; }
+.agebox p { color: #ccc; }
+.agebox .btn { width: 100%; margin-top: 10px; }
+.agebox .btn-dark { background: #333; color: #fff; border: 1px solid #555; }
+@media (max-width: 900px) {
+  .catgrid { grid-template-columns: repeat(2, 1fr); }
+  footer .cols { grid-template-columns: repeat(2, 1fr); }
+  .hero h1 { font-size: 30px; }
+}
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }
-  .filters { position: static; }
+  .filters { width: 100%; }
+  .catgrid { grid-template-columns: 1fr; }
+  .headcontact { text-align: left; margin-left: 0; }
   .searchbar { flex-direction: column; }
 }

@@ -129,8 +129,67 @@ async function initShop() {
   }
   function resetAndRender() { page = 1; render(); }
   [qEl, catEl, brandEl, calEl, stockEl, sortEl].forEach((el) => el.addEventListener('input', resetAndRender));
-  document.getElementById('searchForm').addEventListener('submit', (e) => { e.preventDefault(); resetAndRender(); });
+  const searchForm = document.getElementById('searchForm');
+  if (searchForm) searchForm.addEventListener('submit', (e) => { e.preventDefault(); resetAndRender(); });
+  // SEO / shareable URLs: index.html?category=Handguns or ?q=Glock%2019
+  // pre-fills the shop filters. Facets loaded in render() preserve these
+  // values when they exist in the facet lists.
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('q')) qEl.value = params.get('q');
+    if (params.get('category')) catEl.value = params.get('category');
+    if (params.get('brand')) brandEl.value = params.get('brand');
+    if (params.get('caliber')) calEl.value = params.get('caliber');
+  } catch (e) { /* ignore malformed URLs */ }
   render();
+}
+// Category landing pages (handguns.html, rifles.html, ...): a simple grid
+// fed by one API query — category=... or q=... — with pagination. The
+// landing copy itself is static HTML (indexable), only the grid is JS.
+async function initCategoryGrid() {
+  const holder = document.getElementById('categoryResults');
+  if (!holder) return;
+  const listEl = document.getElementById('results');
+  const countEl = document.getElementById('count');
+  const pageEl = document.getElementById('pagination');
+  let page = 1, totalPages = 1;
+  async function render() {
+    const params = new URLSearchParams({ page: String(page), limit: '48' });
+    if (holder.dataset.shopType === 'category') params.set('category', holder.dataset.shopValue);
+    else params.set('q', holder.dataset.shopValue);
+    try {
+      const res = await fetch('/api/products?' + params.toString());
+      const data = await res.json();
+      totalPages = Math.max(1, Math.ceil((data.total || 0) / 48));
+      countEl.textContent = (data.total || 0) + ' product' + (data.total === 1 ? '' : 's') + (data.total > 48 ? ` — page ${page} of ${totalPages}` : '');
+      listEl.innerHTML = (data.products || []).map(card).join('') || '<p>No products found in this category right now.</p>';
+      if (pageEl) {
+        pageEl.innerHTML = totalPages > 1 ? `<button id="prevPage" ${page <= 1 ? 'disabled' : ''}>← Previous</button> <span style="margin:0 8px">Page ${page} of ${totalPages}</span> <button id="nextPage" ${page >= totalPages ? 'disabled' : ''}>Next →</button>` : '';
+        const prev = document.getElementById('prevPage');
+        const next = document.getElementById('nextPage');
+        if (prev) prev.onclick = () => { if (page > 1) { page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+        if (next) next.onclick = () => { if (page < totalPages) { page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+      }
+    } catch (e) { listEl.innerHTML = '<p>Products could not be loaded right now.</p>'; }
+  }
+  render();
+}
+function initAgeGate() {
+  const gate = document.getElementById('ageGate');
+  if (!gate) return;
+  try {
+    const stored = localStorage.getItem('xl_age_verified');
+    if (stored && Date.now() - parseInt(stored, 10) < 30 * 24 * 60 * 60 * 1000) return; // verified in last 30 days
+  } catch (e) { /* private mode: show gate every visit */ }
+  gate.classList.remove('hidden');
+  document.getElementById('ageEnter').onclick = () => {
+    try { localStorage.setItem('xl_age_verified', String(Date.now())); } catch (e) {}
+    gate.classList.add('hidden');
+  };
+  document.getElementById('ageExit').onclick = () => {
+    const denied = document.getElementById('ageDenied');
+    if (denied) denied.style.display = 'block';
+  };
 }
 async function initProduct() {
   const el = document.getElementById('product');
@@ -147,6 +206,15 @@ async function initProduct() {
     p = (data.products || []).find((x) => x.sku === sku) || data.products[0];
   }
   if (!p) { el.innerHTML = '<p>Product not found.</p>'; return; }
+  // SEO: product page title + Product structured data, so Google can show
+  // price / availability for this SKU even though the page is JS-rendered.
+  try {
+    document.title = p.title + ' | XL Arms';
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: p.category, offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
+    document.head.appendChild(ld);
+  } catch (e) { /* SEO enhancement only */ }
   const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm
     ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
@@ -171,4 +239,4 @@ async function initProduct() {
     <p>${p.description || ''}</p>
     ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
 }
-document.addEventListener('DOMContentLoaded', () => { initShop(); initProduct(); });
+document.addEventListener('DOMContentLoaded', () => { initAgeGate(); initShop(); initCategoryGrid(); initProduct(); });
