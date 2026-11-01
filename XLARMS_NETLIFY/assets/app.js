@@ -128,28 +128,41 @@ async function initFeatured() {
   const el = document.getElementById('featuredResults'); if (!el) return;
   let items = [];
   try {
-    const res = await fetch('/api/products?inStock=1&limit=100&page=1');
-    if (res.ok) { const d = await res.json(); items = d.products || []; }
+    // Wider pool than the old single page: first 4 in-stock pages.
+    const pages = await Promise.all([1, 2, 3, 4].map(async (page) => {
+      try { const res = await fetch(`/api/products?inStock=1&limit=48&page=${page}`); if (!res.ok) return []; const d = await res.json(); return d.products || []; } catch (e) { return []; }
+    }));
+    const seen = new Set();
+    for (const p of pages.flat()) { if (p && p.sku && !seen.has(p.sku)) { seen.add(p.sku); items.push(p); } }
   } catch (e) {}
   if (!items.length) {
     try { const r = await fetch('data/products.json'); const d = await r.json(); items = (d.products || []).filter((p) => p.stock_qty > 0); } catch (e) {}
   }
+  // 2-day rotation (Jonathan, 2026-10-28): one shared 2-day window for
+  // every visitor (UTC days). Each anchor picks from its own pool by
+  // period index, so every anchor with 2+ candidates changes each
+  // window; fills scan a list rotated by a 37-step so they change too.
+  // Rules are unchanged: in-stock only, category spread, no second 1791.
+  const period = Math.floor(Date.now() / 86400000 / 2);
   // Curated variety, not the first page of the catalog (which was all holsters):
-  // a pistol, a red dot, a bag, a shotgun, an AR-15, then more mixed picks.
+  // a pistol, a red dot, a bag, a shotgun, an AR-15, ammunition, then more mixed picks.
   const hay = (p) => [p.title, p.brand, p.model, p.category, p.caliber].join(' ').toLowerCase();
   const picked = [];
-  const take = (pred) => { const p = items.find((x) => !picked.includes(x) && pred(x)); if (p) picked.push(p); };
+  const take = (pred) => { const pool = items.filter((x) => !picked.includes(x) && pred(x)); if (pool.length) picked.push(pool[period % pool.length]); };
   take((p) => p.category === 'Handguns' || hay(p).includes('pistol'));
   take((p) => hay(p).includes('red dot') || hay(p).includes('reflex') || (hay(p).includes('dot') && p.category === 'Optics') || p.category === 'Optics');
   take((p) => /soft cases|packs|bags/.test(p.category) || /range bag|backpack|duffel|gun bag/.test(hay(p)));
   take((p) => p.category === 'Shotguns' || hay(p).includes('shotgun'));
   take((p) => hay(p).includes('ar-15') || hay(p).includes('ar15'));
+  take((p) => p.category === 'Ammunition' || hay(p).includes('ammunition'));
   // Fill to 8 with new categories first, never a second 1791 holster.
-  for (const p of items) {
+  let ordered = items;
+  if (items.length > 1) { const offset = (period * 37) % items.length; ordered = items.slice(offset).concat(items.slice(0, offset)); }
+  for (const p of ordered) {
     if (picked.length >= 8) break;
     if (!picked.includes(p) && !picked.some((q) => q.category === p.category) && p.brand !== '1791') picked.push(p);
   }
-  for (const p of items) {
+  for (const p of ordered) {
     if (picked.length >= 8) break;
     if (!picked.includes(p) && p.brand !== '1791') picked.push(p);
   }

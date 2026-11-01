@@ -8,7 +8,7 @@
 //
 // DECISIONS (Jonathan, 2026-10-25):
 //   PRICING = sell at MAP (inventory field 71, cross-checked with retail-map.csv).
-//     No-MAP SKU: flag it, fall back to MSRP (field 6), never invent a price.
+//     No-MAP SKU (blank OR $0): flag it, fall back to MSRP (field 6), never invent a price.
 //     Price-match and FFL-fee-up-to-$25-if-proven are SITE OFFERS, not importer
 //     discounts — they are not applied here, and must never go below MAP or cost.
 //   CATALOG = FULL RSR catalog. No brand/category exclusions.
@@ -326,12 +326,20 @@ function buildCatalog(files, opts = {}) {
   for (const [rsr, inv] of inventory) {
     const isDeleted = deleted.has(rsr) || inv.statusFlag.toLowerCase() === 'deleted';
     if (isDeleted) { hidden++; continue; } // deleted SKUs are hidden, even if qty lingers
-    // MAP pricing: retail-map wins if present, else inventory field 71, else MSRP + flag.
-    let price = retailMap.has(rsr) ? retailMap.get(rsr) : inv.mapPrice;
-    let priceSource = retailMap.has(rsr) ? 'retail-map' : (inv.mapPrice != null ? 'inventory-field-71' : null);
+    // MAP pricing: first usable value above $0 wins — retail-map, then inventory
+    // field 71, then MSRP + flag. A MAP of exactly $0 is "no MAP", not a price:
+    // the old null-only check took $0 as a real price and never fell back.
+    let price = null, priceSource = null;
+    const mapCandidates = [];
+    if (retailMap.has(rsr)) mapCandidates.push(['retail-map', retailMap.get(rsr)]);
+    mapCandidates.push(['inventory-field-71', inv.mapPrice]);
+    for (const [source, value] of mapCandidates) {
+      if (value != null && value > 0) { price = value; priceSource = source; break; }
+    }
     if (price == null) { price = inv.msrp; priceSource = 'msrp-fallback'; noMapFlagged++; errors.push(`No MAP for ${rsr} — fell back to MSRP.`); }
+    if (price == null || price <= 0) { price = 0; priceSource = 'unpriced'; }
     if (retailMap.has(rsr) && inv.mapPrice != null && retailMap.get(rsr) !== inv.mapPrice) {
-      errors.push(`MAP mismatch for ${rsr}: retail-map ${retailMap.get(rsr)} vs inventory ${inv.mapPrice} — retail-map used.`);
+      errors.push(`MAP mismatch for ${rsr}: retail-map ${retailMap.get(rsr)} vs inventory ${inv.mapPrice} — ${priceSource} used.`);
     }
     const attr = attributesAll.get(rsr) || attributes.get(rsr) || null;
     const attrSource = attributesAll.has(rsr) ? 'attributes-all' : (attributes.has(rsr) ? 'attributes' : null);

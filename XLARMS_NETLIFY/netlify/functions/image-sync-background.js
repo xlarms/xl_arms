@@ -74,6 +74,18 @@
 const { Writable } = require('stream');
 const { imageShard } = require('./rsr-import');
 
+// Hi-res tree sharding differs from the standard tree (proven 2026-11-01
+// from RSR's own FTP listing): digit SKUs live in the '#' folder in
+// ftp_highres_images/rsr_number/ (e.g. 17912WH-..._HR.jpg in '#'), NOT in
+// a 'num' folder, which does not exist there. Standard tree keeps
+// digit -> 'num'. So hi downloads/listings must use hiShard, never
+// imageShard, or digit hi-res can never be found.
+function hiShard(rsr) {
+  const c = String(rsr || '').charAt(0);
+  if (/[a-zA-Z]/.test(c)) return c.toLowerCase();
+  return '#';
+}
+
 const MAX_IMAGES_PER_SKU = 10;
 
 function downloadOne(client, remotePath) {
@@ -221,13 +233,19 @@ exports.handler = async (event) => {
       // only SKUs that actually have high-res are attempted.
       const tree = hiOnly ? 'ftp_highres_images' : 'ftp_images';
       const pattern = hiOnly ? /^(.+?)_\d+_HR\.jpg$/i : /^(.+?)_\d+\.jpg$/i;
-      const list = await ftp.list(`${tree}/rsr_number/${shard}/`);
+      // Hi tree: 'num' does not exist — digit SKUs live in '#'. List '#'
+      // for a hi 'num' job, then filter to digit SKUs below so the job
+      // still means digit SKUs only (the later '#' hi job skips any
+      // already-done-hi SKUs).
+      const listShard = (hiOnly && shard === 'num') ? '#' : shard;
+      const list = await ftp.list(`${tree}/rsr_number/${listShard}/`);
       const found = new Set();
       for (const entry of list) {
         const m = String(entry.name || '').match(pattern);
         if (m) found.add(m[1]);
       }
       skus = [...found].sort();
+      if (hiOnly && shard === 'num') skus = skus.filter((s) => /^[0-9]/.test(s));
     } else {
       const def = process.env.IMAGE_SYNC_TEST_SKUS || 'GLUI4350201';
       skus = def.split(',').map((s) => s.trim()).filter(Boolean);
@@ -298,10 +316,12 @@ exports.handler = async (event) => {
           sizes.push(buf.length);
         }
         // High-res mirror: same numbering, independent loop (a SKU can have
-        // fewer hi images than standard, or none at all).
+        // fewer hi images than standard, or none at all). Hi path uses
+        // hiShard (digit -> '#'), NOT imageShard (digit -> 'num'), because
+        // the hi tree has no 'num' folder.
         const hiSizes = [];
         for (let n = 1; n <= MAX_IMAGES_PER_SKU; n++) {
-          const remote = `ftp_highres_images/rsr_number/${shard}/${sku}_${n}_HR.jpg`;
+          const remote = `ftp_highres_images/rsr_number/${hiShard(sku)}/${sku}_${n}_HR.jpg`;
           let buf;
           try {
             buf = await downloadRetry(remote);
