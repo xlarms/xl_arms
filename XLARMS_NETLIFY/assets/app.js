@@ -201,6 +201,15 @@ async function initFeatured() {
   }
   el.innerHTML = picked.map(card).join('') || '<p>Featured products could not be loaded right now.</p>';
 }
+// Customer-facing category: RSR calls all rifles + shotguns 'Long Guns',
+// which is why shotgun cards said 'Long Guns'. Translate by subCategory
+// (2026-11-01). Lower Receivers stay 'Long Guns' — they are not a rifle.
+function displayCategory(p) {
+  if (!p || p.category !== 'Long Guns') return p ? p.category : '';
+  if (['Defensive Shotguns', 'Sporting Shotguns'].includes(p.subCategory)) return 'Shotguns';
+  if (['AK Style Rifles', 'Bullpups', 'Hunting Rifles', 'Modern Sporting Rifles', 'Surplus/Replica Rifles'].includes(p.subCategory)) return 'Rifles';
+  return 'Long Guns';
+}
 function card(p) {
   const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
@@ -208,7 +217,7 @@ function card(p) {
   return `<article class="card">
     <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}"></a>
     <h3><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title}</a></h3>
-    <div class="meta">${p.brand} · ${p.category}${p.caliber ? ' · ' + p.caliber : ''}</div>
+    <div class="meta">${p.brand} · ${displayCategory(p)}${p.caliber ? ' · ' + p.caliber : ''}</div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
     <div>${stock}</div>${ffl}
     ${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${sku}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
@@ -316,10 +325,10 @@ async function initShop() {
   const stockEl = document.getElementById('instock');
   const sortEl = document.getElementById('sort');
   if (!listEl) return;
-  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0, lastFacets = null;
+  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0, lastFacets = null, shopParam = '';
   const side = baseSidebarState();
   function clearShopFilters() {
-    qEl.value = ''; catEl.value = ''; brandEl.value = ''; calEl.value = ''; stockEl.checked = false; sortEl.value = 'relevance';
+    qEl.value = ''; catEl.value = ''; brandEl.value = ''; calEl.value = ''; stockEl.checked = false; sortEl.value = 'relevance'; shopParam = '';
     Object.assign(side, baseSidebarState());
     const detailEl = document.getElementById('detailFilters');
     if (detailEl && lastFacets) renderSidebar(detailEl, lastFacets, side, { includeBasics: false, heading: false, force: true }, resetAndRender, clearShopFilters);
@@ -337,6 +346,7 @@ async function initShop() {
       sort: ['price-asc', 'price-desc', 'newest'].includes(sortEl.value) ? sortEl.value : '',
       page: String(page), limit: side.perPage,
     };
+    if (shopParam) paramObj.shop = shopParam;
     Object.assign(paramObj, sidebarParams(side));
     const params = new URLSearchParams(paramObj);
     const mySeq = ++renderSeq;
@@ -417,6 +427,7 @@ async function initShop() {
   try {
     const params = new URLSearchParams(location.search);
     if (params.get('q')) qEl.value = params.get('q');
+    if (params.get('shop')) shopParam = params.get('shop');
     if (params.get('category')) catEl.value = params.get('category');
     if (params.get('brand')) brandEl.value = params.get('brand');
     if (params.get('caliber')) calEl.value = params.get('caliber');
@@ -449,10 +460,14 @@ async function initCategoryGrid() {
     const userQ = catQEl ? catQEl.value.trim() : '';
     // Scoped search: on a category page, search stays INSIDE that category.
     // Category-type pages: category=... + q=user term (API applies both).
-    // Q-type pages (rifles/shotguns): base term + user term combined, so a
-    // search for "AR-15" on the Rifles page still returns rifles, not all products.
+    // Shop-type pages (shotguns/rifles): shop=... + q=user term, so the
+    // page is the real Long Guns subCategory pool, not a q=shotgun search.
+    // Q-type pages (legacy): base term + user term combined.
     if (holder.dataset.shopType === 'category') {
       params.set('category', holder.dataset.shopValue);
+      if (userQ) params.set('q', userQ);
+    } else if (holder.dataset.shopType === 'shop') {
+      params.set('shop', holder.dataset.shopValue);
       if (userQ) params.set('q', userQ);
     } else {
       params.set('q', userQ ? (holder.dataset.shopValue + ' ' + userQ) : holder.dataset.shopValue);
@@ -522,7 +537,7 @@ async function initProduct() {
     document.title = p.title + ' | XL Arms';
     const ld = document.createElement('script');
     ld.type = 'application/ld+json';
-    ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: p.category, offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
+    ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: displayCategory(p), offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
     document.head.appendChild(ld);
   } catch (e) { /* SEO enhancement only */ }
   const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
@@ -546,7 +561,7 @@ async function initProduct() {
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
       <tr><th>Model</th><td>${p.model}</td></tr>
-      <tr><th>Category</th><td>${p.category}</td></tr>
+      <tr><th>Category</th><td>${displayCategory(p)}</td></tr>
       ${p.caliber ? `<tr><th>Caliber / Gauge</th><td>${p.caliber}</td></tr>` : ''}
       ${p.action ? `<tr><th>Action</th><td>${p.action}</td></tr>` : ''}
       ${p.barrel_in ? `<tr><th>Barrel</th><td>${p.barrel_in}"</td></tr>` : ''}

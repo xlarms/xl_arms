@@ -169,6 +169,20 @@ exports.handler = async (event) => {
     if (raw) {
       items = items.map((p) => ({ p, s: score(p, toks, raw) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
     }
+    // Shop pools (2026-11-01): RSR has no 'Shotguns'/'Rifles' category —
+    // both live under 'Long Guns', split by subCategory. A q=shotgun /
+    // q=rifle search only returns 104 / accessory-heavy items, so the
+    // Shotguns/Rifles pages use ?shop=shotguns|rifles instead. Applied
+    // BEFORE the facet snapshot, so sidebar facets are pool-only.
+    // Lower Receivers are in neither pool (parts, not complete guns).
+    const SHOP_POOLS = {
+      shotguns: ['Defensive Shotguns', 'Sporting Shotguns'],
+      rifles: ['AK Style Rifles', 'Bullpups', 'Hunting Rifles', 'Modern Sporting Rifles', 'Surplus/Replica Rifles'],
+    };
+    if (q.shop && SHOP_POOLS[q.shop]) {
+      const pool = SHOP_POOLS[q.shop];
+      items = items.filter((p) => eq(p.category, 'Long Guns') && pool.includes(p.subCategory));
+    }
     const facetBase = items;
     if (q.brand) items = items.filter((p) => eq(p.brand, q.brand));
     if (q.caliber) items = items.filter((p) => normCaliber(p.caliber) === normCaliber(q.caliber) || normCaliber(p.caliber_canonical) === normCaliber(q.caliber) || eq(p.caliber, q.caliber));
