@@ -174,8 +174,24 @@ async function initFeatured() {
     const choice = pool[period % pool.length];
     if (choice && !picked.includes(choice)) picked.push(choice);
   }
-  // Fill to 8 from the anchor pools' remaining items, rotated by period,
-  // category-spread first, never a 1791 item.
+  // Spots 7 and 8 (2026-11-01, Jonathan): a second pistol and a second
+  // shotgun — NOT the generic fill, which was landing on two soft gun
+  // cases. Take the next distinct item from each pool, wrapping around.
+  const nextDistinct = (pool) => {
+    if (!pool || !pool.length) return null;
+    for (let i = 1; i <= pool.length; i++) {
+      const cand = pool[(period + i) % pool.length];
+      if (cand && !picked.includes(cand)) return cand;
+    }
+    return null;
+  };
+  const secondPistol = nextDistinct(pools[0]);
+  if (secondPistol) picked.push(secondPistol);
+  const secondShotgun = nextDistinct(pools[3]);
+  if (secondShotgun) picked.push(secondShotgun);
+  // Any remaining spots (only if an anchor pool was empty) fill from the
+  // anchor pools' remaining items, rotated by period, category-spread
+  // first, never a 1791 item.
   const rest = clean(pools.flat()).filter((p) => !picked.includes(p) && !is1791(p) && p.stock_qty > 0);
   const ordered = rest.length ? rest.slice((period * 37) % rest.length).concat(rest.slice(0, (period * 37) % rest.length)) : [];
   for (const p of ordered) { if (picked.length >= 8) break; if (!picked.some((q) => q.category === p.category)) picked.push(p); }
