@@ -122,49 +122,66 @@ function initCartPage() {
   el.innerHTML = cart.map((i) => { total += i.price * i.qty; return `<div class="cartitem"><img src="${esc(i.image)}" alt=""><div><strong>${esc(i.title)}</strong><div class="meta">${esc(i.sku)}${i.is_firearm ? ' · Ships to your FFL' : ''}</div><div>${money(i.price)} × <button onclick="cartQty('${esc(i.sku)}',-1)">−</button> ${i.qty} <button onclick="cartQty('${esc(i.sku)}',1)">+</button> <button onclick="cartRemove('${esc(i.sku)}')">Remove</button></div></div><div class="price">${money(i.price * i.qty)}</div></div>`; }).join('');
   if (totalEl) totalEl.textContent = 'Subtotal: ' + money(total);
 }
-/* Featured products (homepage): first in-stock products, one per category
-   where possible, so the strip looks like a store front, not a full grid. */
+/* Featured products (homepage): one per anchor, each anchor fetched from
+   its own real API pool (2026-11-01 rebuild). The old version only looked
+   at the first 4 in-stock pages, SKU-ascending — 1791/A items only — so
+   no pistol, shotgun, AR-15 or ammunition could ever be picked, and the
+   1791 guard (brand !== '1791') never matched the real brand
+   '1791 Gunleather'. Real categories, verified live 2026-11-01:
+   Handguns; Optics + 'red dot'; Soft Gun Cases, Packs, Bags / Packs & Bags;
+   Long Guns + Defensive/Sporting Shotguns; Long Guns + Modern Sporting
+   Rifles; Ammunition. */
 async function initFeatured() {
   const el = document.getElementById('featuredResults'); if (!el) return;
-  let items = [];
-  try {
-    // Wider pool than the old single page: first 4 in-stock pages.
-    const pages = await Promise.all([1, 2, 3, 4].map(async (page) => {
-      try { const res = await fetch(`/api/products?inStock=1&limit=48&page=${page}`); if (!res.ok) return []; const d = await res.json(); return d.products || []; } catch (e) { return []; }
-    }));
-    const seen = new Set();
-    for (const p of pages.flat()) { if (p && p.sku && !seen.has(p.sku)) { seen.add(p.sku); items.push(p); } }
-  } catch (e) {}
-  if (!items.length) {
-    try { const r = await fetch('data/products.json'); const d = await r.json(); items = (d.products || []).filter((p) => p.stock_qty > 0); } catch (e) {}
-  }
-  // 2-day rotation (Jonathan, 2026-10-28): one shared 2-day window for
-  // every visitor (UTC days). Each anchor picks from its own pool by
-  // period index, so every anchor with 2+ candidates changes each
-  // window; fills scan a list rotated by a 37-step so they change too.
-  // Rules are unchanged: in-stock only, category spread, no second 1791.
   const period = Math.floor(Date.now() / 86400000 / 2);
-  // Curated variety, not the first page of the catalog (which was all holsters):
-  // a pistol, a red dot, a bag, a shotgun, an AR-15, ammunition, then more mixed picks.
-  const hay = (p) => [p.title, p.brand, p.model, p.category, p.caliber].join(' ').toLowerCase();
-  const picked = [];
-  const take = (pred) => { const pool = items.filter((x) => !picked.includes(x) && pred(x)); if (pool.length) picked.push(pool[period % pool.length]); };
-  take((p) => p.category === 'Handguns' || hay(p).includes('pistol'));
-  take((p) => hay(p).includes('red dot') || hay(p).includes('reflex') || (hay(p).includes('dot') && p.category === 'Optics') || p.category === 'Optics');
-  take((p) => /soft cases|packs|bags/.test(p.category) || /range bag|backpack|duffel|gun bag/.test(hay(p)));
-  take((p) => p.category === 'Shotguns' || hay(p).includes('shotgun'));
-  take((p) => hay(p).includes('ar-15') || hay(p).includes('ar15'));
-  take((p) => p.category === 'Ammunition' || hay(p).includes('ammunition'));
-  // Fill to 8 with new categories first, never a second 1791 holster.
-  let ordered = items;
-  if (items.length > 1) { const offset = (period * 37) % items.length; ordered = items.slice(offset).concat(items.slice(0, offset)); }
-  for (const p of ordered) {
-    if (picked.length >= 8) break;
-    if (!picked.includes(p) && !picked.some((q) => q.category === p.category) && p.brand !== '1791') picked.push(p);
+  const is1791 = (p) => String(p.brand || '').startsWith('1791');
+  const hasPhoto = (p) => p.images && p.images[0] && !String(p.images[0]).includes('placeholder');
+  const clean = (list) => {
+    const seen = new Set(); const out = [];
+    for (const p of list || []) { if (p && p.sku && !seen.has(p.sku)) { seen.add(p.sku); out.push(p); } }
+    return out;
+  };
+  // Prefer in-stock, priced, real-photo items; fall back to the raw pool
+  // only if that leaves an anchor empty (so an anchor never vanishes).
+  const prefer = (list) => {
+    const base = clean(list).filter((p) => p.stock_qty > 0 && !is1791(p));
+    const good = base.filter((p) => p.price > 0 && hasPhoto(p));
+    return good.length ? good : base;
+  };
+  const fetchPool = async (url) => {
+    try { const res = await fetch(url); if (!res.ok) return []; const d = await res.json(); return d.products || []; } catch (e) { return []; }
+  };
+  const enc = encodeURIComponent;
+  const anchorUrls = [
+    [`/api/products?inStock=1&limit=100&category=${enc('Handguns')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Optics')}&q=${enc('red dot')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Soft Gun Cases, Packs, Bags')}&subCategory=${enc('Packs & Bags')}`,
+     `/api/products?inStock=1&limit=100&category=${enc('Soft Gun Cases, Packs, Bags')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Defensive Shotguns')}`,
+     `/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Sporting Shotguns')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Modern Sporting Rifles')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Ammunition')}`],
+  ];
+  const pools = [];
+  for (const urls of anchorUrls) {
+    let pool = [];
+    for (const url of urls) { const got = await fetchPool(url); pool = pool.concat(got); if (pool.length) break; }
+    pools.push(prefer(pool));
   }
-  for (const p of ordered) {
-    if (picked.length >= 8) break;
-    if (!picked.includes(p) && p.brand !== '1791') picked.push(p);
+  let picked = [];
+  for (const pool of pools) {
+    if (!pool.length) continue;
+    const choice = pool[period % pool.length];
+    if (choice && !picked.includes(choice)) picked.push(choice);
+  }
+  // Fill to 8 from the anchor pools' remaining items, rotated by period,
+  // category-spread first, never a 1791 item.
+  const rest = clean(pools.flat()).filter((p) => !picked.includes(p) && !is1791(p) && p.stock_qty > 0);
+  const ordered = rest.length ? rest.slice((period * 37) % rest.length).concat(rest.slice(0, (period * 37) % rest.length)) : [];
+  for (const p of ordered) { if (picked.length >= 8) break; if (!picked.some((q) => q.category === p.category)) picked.push(p); }
+  for (const p of ordered) { if (picked.length >= 8) break; if (!picked.includes(p)) picked.push(p); }
+  if (!picked.length) {
+    try { const r = await fetch('data/products.json'); const d = await r.json(); picked = prefer((d.products || []).filter((p) => p.stock_qty > 0)).slice(0, 8); } catch (e) {}
   }
   el.innerHTML = picked.map(card).join('') || '<p>Featured products could not be loaded right now.</p>';
 }
