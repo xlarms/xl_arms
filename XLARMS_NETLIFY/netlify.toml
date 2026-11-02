@@ -16,3 +16,9 @@
 # Schedules run in UTC and only on published deploys.
 [functions."backfill-scheduler"]
   schedule = "*/30 * * * *"
+
+# Gap-fill auto-queue (Jonathan, 2026-11-02): in-stock missing photos only,
+# standard first, hi second, one batch per wake. See
+# netlify/functions/gapfill-scheduler.js. Pause with GAPFILL_AUTO_PAUSED=1.
+[functions."gapfill-scheduler"]
+  schedule = "*/30 * * * *"

@@ -162,12 +162,16 @@ async function initFeatured() {
     [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Modern Sporting Rifles')}`],
     [`/api/products?inStock=1&limit=100&category=${enc('Ammunition')}`],
   ];
-  const pools = [];
-  for (const urls of anchorUrls) {
+  // 2026-11-02 speedup: fetch the 6 anchor pools IN PARALLEL instead of
+  // one after another — each API call reloads the full catalog, so the
+  // sequential version waited for six full loads. Fallback URLs within
+  // one anchor still run in order (only if the first returns empty).
+  // Promise.all preserves anchor order, so picks are unchanged.
+  const pools = await Promise.all(anchorUrls.map(async (urls) => {
     let pool = [];
     for (const url of urls) { const got = await fetchPool(url); pool = pool.concat(got); if (pool.length) break; }
-    pools.push(prefer(pool));
-  }
+    return prefer(pool);
+  }));
   let picked = [];
   for (const pool of pools) {
     if (!pool.length) continue;
@@ -211,7 +215,7 @@ function displayCategory(p) {
   return 'Long Guns';
 }
 function card(p) {
-  const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
+  const stock = p.stock_qty > 0 ? `<span class="instock">In stock</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
   const sku = String(p.sku).replace(/'/g, "\\'");
   return `<article class="card">
@@ -540,7 +544,7 @@ async function initProduct() {
     ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: displayCategory(p), offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
     document.head.appendChild(ld);
   } catch (e) { /* SEO enhancement only */ }
-  const stock = p.stock_qty > 0 ? `<span class="instock">In stock (${p.stock_qty})</span>` : `<span class="outstock">Out of stock</span>`;
+  const stock = p.stock_qty > 0 ? `<span class="instock">In stock</span>` : `<span class="outstock">Out of stock</span>`;
   const ffl = p.is_firearm
     ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
     : `<div class="ffl"><strong>Ships normally.</strong> Ammunition and accessories do not require an FFL transfer, but state shipping restrictions still apply at checkout.</div>`;

@@ -52,6 +52,11 @@
 //   ?prefix=aa        with ?shard= or ?skus=: only SKUs starting with that
 //                     prefix (splits a shard into small batches that fit
 //                     the 15-minute background cap).
+//   ?skip-done=1      with ?skus=: skip SKUs that already have standard
+//                     photos (gap-fill resume — a timed-out batch picks
+//                     up where it left off instead of re-downloading).
+//   ?no-hi=1          with ?skus=: skip the hi loop entirely (gap-fill
+//                     standard phase; hi runs as its own phase later).
 //   Progress is saved every 200 SKUs (with a progress log line, so the
 //   log visibly advances instead of staying quiet). In hi-only mode,
 //   SKUs whose hi is already recorded are skipped, so re-triggering a
@@ -187,6 +192,12 @@ exports.handler = async (event) => {
   try {
     const qs = event.queryStringParameters || {};
     const hiOnly = qs['hi-only'] === '1';
+    // Gap-fill scheduler modes (2026-11-02): ?skip-done=1 skips SKUs that
+    // already have standard photos (so a timed-out batch resumes instead
+    // of re-downloading); ?no-hi=1 skips the hi loop entirely, so the
+    // standard phase runs fast and hi runs as its own phase later.
+    const skipDone = qs['skip-done'] === '1';
+    const noHi = qs['no-hi'] === '1';
     const prefix = process.env.WASABI_PREFIX || 'products';
     const hiPrefix = process.env.WASABI_HI_PREFIX || (prefix + '-hi');
     const hostname = process.env.BUNNY_HOSTNAME || '';
@@ -278,7 +289,7 @@ exports.handler = async (event) => {
       // Progress + periodic save: a timeout then loses at most the last
       // batch, and (in hi-only mode, via the skip below) the next run
       // resumes instead of restarting. Also ends the "quiet log" problem.
-      if (idx > 0 && idx % 200 === 0) {
+      if (idx > 0 && idx % 25 === 0) {
         await saveManifest();
         console.log('Image sync progress', JSON.stringify({ hiOnly, processed: idx, skusTotal: skus.length, synced: results.filter((r) => r.status === 'ok').length }));
       }
@@ -289,6 +300,16 @@ exports.handler = async (event) => {
           const done = manifest.images[sku];
           if (done && done.hiCount > 0) {
             results.push({ sku, status: 'already-done-hi', hiCount: done.hiCount });
+            consecutiveDlErrors = 0;
+            continue;
+          }
+        }
+        // Gap-fill resume: standard already recorded — nothing to do in
+        // a standard pass (hi is handled by the separate hi phase).
+        if (skipDone) {
+          const done = manifest.images[sku];
+          if (done && done.count > 0) {
+            results.push({ sku, status: 'already-done', count: done.count });
             consecutiveDlErrors = 0;
             continue;
           }
@@ -320,7 +341,7 @@ exports.handler = async (event) => {
         // hiShard (digit -> '#'), NOT imageShard (digit -> 'num'), because
         // the hi tree has no 'num' folder.
         const hiSizes = [];
-        for (let n = 1; n <= MAX_IMAGES_PER_SKU; n++) {
+        for (let n = 1; !noHi && n <= MAX_IMAGES_PER_SKU; n++) {
           const remote = `ftp_highres_images/rsr_number/${hiShard(sku)}/${sku}_${n}_HR.jpg`;
           let buf;
           try {
@@ -342,7 +363,7 @@ exports.handler = async (event) => {
         // new hi, so the two tracks merge in either order. In normal mode
         // these are exactly the freshly downloaded sides.
         const effSizes = (hiOnly && prev && prev.sizes) ? prev.sizes : sizes;
-        const effHiSizes = (hiOnly && hiSizes.length === 0 && prev && prev.hiSizes) ? prev.hiSizes : hiSizes;
+        const effHiSizes = ((hiOnly || noHi) && hiSizes.length === 0 && prev && prev.hiSizes) ? prev.hiSizes : hiSizes;
         if (effSizes.length === 0 && effHiSizes.length === 0) { consecutiveDlErrors = 0; results.push({ sku, status: 'no-images-on-ftp' }); continue; }
         const changed = !!prev && JSON.stringify(prev.sizes || []) !== JSON.stringify(effSizes);
         const hiChanged = !!prev && (prev.hiCount || 0) > 0 && JSON.stringify(prev.hiSizes || []) !== JSON.stringify(effHiSizes);
