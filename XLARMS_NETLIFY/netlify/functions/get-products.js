@@ -217,6 +217,13 @@ exports.handler = async (event) => {
     const pageSize = Math.min(Math.max(parseInt(q.limit, 10) || 48, 1), 100);
     const page = Math.max(parseInt(q.page, 10) || 1, 1);
     const pageProducts = items.slice((page - 1) * pageSize, page * pageSize);
+    // 2026-11-03 speed: list pages only need card fields. Stripping the
+    // description/features/hi-res URLs from list responses cuts the
+    // 100-product payload from ~242KB to roughly a third, and sorting
+    // already happened above, so dropping fields here changes no order.
+    // Single-SKU lookups (product page) keep the full record.
+    const slim = (p) => ({ sku: p.sku, title: p.title, price: p.price, stock_qty: p.stock_qty, brand: p.brand, model: p.model, category: p.category, subCategory: p.subCategory, caliber: p.caliber, caliber_canonical: p.caliber_canonical, action: p.action, barrel_in: p.barrel_in, capacity: p.capacity, finish: p.finish, is_firearm: p.is_firearm, images: p.images });
+    const slimProducts = pageProducts.map(slim);
     // Facets are value lists (not the 6 MB catalog) from the facet base
     // above. Groups with no values are hidden by the sidebar UI — this is
     // what keeps the new facet groups invisible until the re-import that
@@ -239,7 +246,11 @@ exports.handler = async (event) => {
       capacities: uniqNum(facetBase.map((p) => p.capacity)),
       barrels: uniqNum(facetBase.map((p) => p.barrel_in)),
     };
-    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: pageProducts, total, page, pageSize, facets }) };
+    // CDN cache for list pages only (2026-11-03): identical searches within
+    // 5 minutes serve from the edge instead of reloading the catalog.
+    // Stock/prices can lag up to 5 minutes — acceptable for browsing, and
+    // single-SKU lookups and cart checks are never cached this way.
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=0, s-maxage=300', 'Netlify-CDN-Cache-Control': 'public, max-age=300, stale-while-revalidate=60' }, body: JSON.stringify({ products: slimProducts, total, page, pageSize, facets }) };
   } catch (e) {
     return { statusCode: 500, body: JSON.stringify({ error: 'catalog unavailable', detail: e.message }) };
   }

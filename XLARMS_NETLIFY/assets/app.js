@@ -162,44 +162,70 @@ async function initFeatured() {
     [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Modern Sporting Rifles')}`],
     [`/api/products?inStock=1&limit=100&category=${enc('Ammunition')}`],
   ];
-  // 2026-11-02 speedup: fetch the 6 anchor pools IN PARALLEL instead of
-  // one after another — each API call reloads the full catalog, so the
-  // sequential version waited for six full loads. Fallback URLs within
-  // one anchor still run in order (only if the first returns empty).
-  // Promise.all preserves anchor order, so picks are unchanged.
-  const pools = await Promise.all(anchorUrls.map(async (urls) => {
-    let pool = [];
-    for (const url of urls) { const got = await fetchPool(url); pool = pool.concat(got); if (pool.length) break; }
-    return prefer(pool);
-  }));
+  // 2026-11-03 speed: homepage NO LONGER calls the API 6 times. Each API
+  // call reloads the full ~30k catalog, so featured alone cost ~6 catalog
+  // loads. Instead read data/featured-pools.json — one small static file
+  // (slim card fields, in-stock at generation time, 2026-11-03) served by
+  // the CDN. Period rotation, anchor picks, second pistol/shotgun and
+  // dedup logic are unchanged, and addToCart still re-checks the live SKU
+  // before adding, so a stale featured pick can never sell out-of-stock.
+  // If the static file is missing, fall back to the live API pools.
+  let pools = null;
+  try {
+    const r = await fetch('data/featured-pools.json');
+    if (r.ok) { const d = await r.json(); if (Array.isArray(d.pools) && d.pools.length === 6) pools = d.pools.map((pool) => prefer(pool)); }
+  } catch (e) {}
+  if (!pools) {
+    // 2026-11-02 speedup: fetch the 6 anchor pools IN PARALLEL instead of
+    // one after another. Fallback URLs within one anchor still run in
+    // order (only if the first returns empty). Promise.all preserves
+    // anchor order, so picks are unchanged.
+    pools = await Promise.all(anchorUrls.map(async (urls) => {
+      let pool = [];
+      for (const url of urls) { const got = await fetchPool(url); pool = pool.concat(got); if (pool.length) break; }
+      return prefer(pool);
+    }));
+  }
   let picked = [];
-  for (const pool of pools) {
+  // SKU-based dedup (2026-11-03): the old picked.includes() compared object
+  // identity, which misses the same SKU returned by two different API calls.
+  // Also, a "second" pick must not be the same brand+model as the anchor
+  // pick — live 2026-11-03 the shotgun anchor (JTS M12AR MLOK) and the
+  // second shotgun (JTS M12AR, same model, polymer forend) looked like a
+  // duplicate card to customers.
+  const hasSku = (p) => picked.some((q) => q.sku === p.sku);
+  const anchor = {};
+  for (let ai = 0; ai < pools.length; ai++) {
+    const pool = pools[ai];
     if (!pool.length) continue;
     const choice = pool[period % pool.length];
-    if (choice && !picked.includes(choice)) picked.push(choice);
+    if (choice && !hasSku(choice)) { picked.push(choice); anchor[ai] = choice; }
   }
   // Spots 7 and 8 (2026-11-01, Jonathan): a second pistol and a second
   // shotgun — NOT the generic fill, which was landing on two soft gun
-  // cases. Take the next distinct item from each pool, wrapping around.
-  const nextDistinct = (pool) => {
+  // cases. Take the next distinct item from each pool, wrapping around,
+  // skipping the anchor's brand+model as well as its SKU.
+  const nextDistinct = (pool, anchorPick) => {
     if (!pool || !pool.length) return null;
     for (let i = 1; i <= pool.length; i++) {
       const cand = pool[(period + i) % pool.length];
-      if (cand && !picked.includes(cand)) return cand;
+      if (!cand || hasSku(cand)) continue;
+      if (anchorPick && cand.brand === anchorPick.brand && cand.model && cand.model === anchorPick.model) continue;
+      return cand;
     }
     return null;
   };
-  const secondPistol = nextDistinct(pools[0]);
+  const secondPistol = nextDistinct(pools[0], anchor[0]);
   if (secondPistol) picked.push(secondPistol);
-  const secondShotgun = nextDistinct(pools[3]);
+  const secondShotgun = nextDistinct(pools[3], anchor[3]);
   if (secondShotgun) picked.push(secondShotgun);
   // Any remaining spots (only if an anchor pool was empty) fill from the
   // anchor pools' remaining items, rotated by period, category-spread
   // first, never a 1791 item.
-  const rest = clean(pools.flat()).filter((p) => !picked.includes(p) && !is1791(p) && p.stock_qty > 0);
+  const rest = clean(pools.flat()).filter((p) => !hasSku(p) && !is1791(p) && p.stock_qty > 0);
   const ordered = rest.length ? rest.slice((period * 37) % rest.length).concat(rest.slice(0, (period * 37) % rest.length)) : [];
   for (const p of ordered) { if (picked.length >= 8) break; if (!picked.some((q) => q.category === p.category)) picked.push(p); }
-  for (const p of ordered) { if (picked.length >= 8) break; if (!picked.includes(p)) picked.push(p); }
+  for (const p of ordered) { if (picked.length >= 8) break; if (!hasSku(p)) picked.push(p); }
   if (!picked.length) {
     try { const r = await fetch('data/products.json'); const d = await r.json(); picked = prefer((d.products || []).filter((p) => p.stock_qty > 0)).slice(0, 8); } catch (e) {}
   }
@@ -219,7 +245,7 @@ function card(p) {
   const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
   const sku = String(p.sku).replace(/'/g, "\\'");
   return `<article class="card">
-    <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}"></a>
+    <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}" loading="lazy"></a>
     <h3><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title}</a></h3>
     <div class="meta">${p.brand} · ${displayCategory(p)}${p.caliber ? ' · ' + p.caliber : ''}</div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
