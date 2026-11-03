@@ -296,6 +296,14 @@ function renderSidebar(el, facets, state, opts, onChange, onClear) {
   html += '<label>Per page<select data-perpage><option value="24">24 per page</option><option value="48">48 per page</option><option value="96">96 per page</option></select></label>';
   html += '<button class="btn" data-clear style="margin-top:10px">Clear all filters</button>';
   el.innerHTML = html;
+  // Mobile filter toggle: renderSidebar rewrites a category aside, which
+  // would wipe the static toggle button — put it back at the top.
+  if (el.classList && el.classList.contains('filters') && !el.querySelector('.filter-toggle')) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'filter-toggle'; btn.setAttribute('aria-expanded', 'false');
+    btn.textContent = 'Show filters';
+    el.prepend(btn);
+  }
   const sortSel = el.querySelector('[data-sort]');
   if (sortSel) sortSel.value = state.sort || 'relevance';
   const perSel = el.querySelector('[data-perpage]');
@@ -615,4 +623,16 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') pgStep(-1);
   if (e.key === 'ArrowRight') pgStep(1);
 });
-document.addEventListener('DOMContentLoaded', () => { initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); updateCartBadge(); });
+document.addEventListener('DOMContentLoaded', () => {
+  // Mobile filter toggle (delegated, so buttons recreated by renderSidebar work too).
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.filter-toggle') : null;
+    if (!btn) return;
+    const aside = btn.closest('aside.filters');
+    if (!aside) return;
+    const open = aside.classList.toggle('filters-open');
+    btn.textContent = open ? 'Hide filters' : 'Show filters';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); updateCartBadge();
+});

@@ -104,9 +104,16 @@ footer .fine { border-top: 1px solid #333; margin-top: 18px; padding-top: 12px; 
   footer .cols { grid-template-columns: repeat(2, 1fr); }
   .hero h1 { font-size: 30px; }
 }
+/* Mobile filter toggle (2026-11-03): on a phone the filter sidebar stacks
+   ABOVE the results, so a long open filter list pushed product photos to
+   the bottom of the page and looked like no results. Filters are collapsed
+   behind a button on mobile only; desktop is unchanged. */
+.filter-toggle { display: none; }
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }
   .filters { width: 100%; }
+  .filter-toggle { display: block; width: 100%; background: #d8232a; color: #fff; border: 0; padding: 12px; border-radius: 8px; font-weight: 700; font-size: 16px; cursor: pointer; }
+  aside.filters:not(.filters-open) > :not(.filter-toggle) { display: none; }
   .catgrid { grid-template-columns: 1fr; }
   .headcontact { text-align: left; margin-left: 0; }
   .searchbar { flex-direction: column; }
