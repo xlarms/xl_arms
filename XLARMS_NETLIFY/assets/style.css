@@ -16,7 +16,7 @@ header { background: #111; color: #fff; padding: 14px 20px 0; }
 header .wrap, main.wrap, footer .wrap { max-width: 1140px; margin: 0 auto; }
 .headrow { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-bottom: 14px; }
 .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; }
-.logo img { height: 110px; width: auto; border-radius: 50%; } /* Jonathan: logo was way too small at 52px */
+.logo img { height: 190px; width: auto; border-radius: 50%; } /* Jonathan, 2026-11-03: much larger so EST. 2022 is readable (was 110px, before that 52px) */
 .logo .wordmark { font-weight: 900; line-height: 1; letter-spacing: .5px; }
 .logo .wordmark .xl { color: #e2231a; font-size: 28px; display: block; }
 .logo .wordmark .arms { color: #fff; font-size: 28px; display: block; }
@@ -198,6 +198,13 @@ footer .fine a { display: inline; text-decoration: underline; }
 body.home header nav a { color: #eeeeee; }
 body.home header nav a.deals { color: #ffffff; }
 body.home footer a { color: #d8d2c4; }
+/* Button text must stay white (2026-11-03): the homepage link colour
+   (body.home a) and the product-page link colour (#product a) were both
+   beating .btn, so red <a class="btn"> buttons rendered dark-red text on
+   a red background — e.g. "Shop all 26,000+ products" looked faint, while
+   <button> Add to Cart buttons (white text) looked fine. This rule beats
+   both link-colour rules, on every page. */
+body.home a.btn, #product a.btn, a.btn { color: #ffffff; }
 body.home .topbar a { color: #d8d2c4; }
 body.home .headcontact a, body.home .cartlink { color: #ffffff; }
 body.home .tile, body.home .tile h3 { color: #ffffff; }
