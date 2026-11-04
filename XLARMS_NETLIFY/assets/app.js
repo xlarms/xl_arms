@@ -610,8 +610,10 @@ async function initProduct() {
       <tr><th>UPC</th><td>${p.upc}</td></tr>
     </table>
     <p>${p.description || ''}</p>
-    ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}`;
+    ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}
+    <div id="compareSimilar"></div>`;
   window.__pgImgs = (p.images || []).filter(Boolean);
+  initCompareSimilar(p);
   window.__pgHi = (p.hires || []).filter(Boolean);
   window.__pgIdx = 0;
 }
@@ -663,6 +665,51 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); initFFLFinder(); updateCartBadge();
 });
+/* Compare similar (2026-11-03): the customer does NOT pick from 30,000
+   products — the site suggests up to 3 in-stock guns like this one
+   (same caliber first, then same subcategory/action, closest price),
+   shown side-by-side with differing specs highlighted. If fewer than
+   2 similar in-stock guns exist, the section stays hidden. Stock is
+   shown as "In stock" only, never a quantity. */
+async function initCompareSimilar(p) {
+  const box = document.getElementById('compareSimilar'); if (!box || !p.caliber) return;
+  try {
+    const res = await fetch('/api/products?caliber=' + encodeURIComponent(p.caliber_canonical || p.caliber) + '&inStock=1&limit=48');
+    if (!res.ok) return;
+    const data = await res.json();
+    let pool = (data.products || []).filter((x) => x.sku !== p.sku && x.price > 0);
+    // Score: same subcategory +3, same action +2, same brand +1, barrel within 1" +1, price closeness tiebreak.
+    pool = pool.map((x) => {
+      let s = 0;
+      if (x.subCategory && x.subCategory === p.subCategory) s += 3;
+      if (x.action && x.action === p.action) s += 2;
+      if (x.brand && x.brand === p.brand) s += 1;
+      if (x.barrel_in && p.barrel_in && Math.abs(x.barrel_in - p.barrel_in) <= 1) s += 1;
+      return { x, s, pdiff: Math.abs(x.price - p.price) };
+    }).sort((a, b) => (b.s - a.s) || (a.pdiff - b.pdiff)).map((o) => o.x).slice(0, 3);
+    if (pool.length < 1) return;
+    const cols = [p, ...pool];
+    const rows = [
+      ['Photo', (x) => `<img src="${(x.images || [])[0] || 'images/placeholder.svg'}" alt="${x.title}" style="width:90px;height:60px;object-fit:contain;background:#f0ede6;border-radius:6px">`],
+      ['Product', (x) => `<a href="product.html?sku=${encodeURIComponent(x.sku)}">${x.title}</a>`],
+      ['Price', (x) => money(x.price)],
+      ['Stock', (x) => 'In stock'],
+      ['Brand', (x) => x.brand || '—'],
+      ['Caliber', (x) => x.caliber || '—'],
+      ['Action', (x) => x.action || '—'],
+      ['Barrel', (x) => x.barrel_in ? x.barrel_in + '"' : '—'],
+      ['Capacity', (x) => x.capacity || '—'],
+      ['Finish', (x) => x.finish || '—'],
+    ];
+    const thead = '<tr><th></th>' + cols.map((x) => `<th>${x === p ? 'This gun' : x.title}</th>`).join('') + '</tr>';
+    const tbody = rows.map(([label, fn]) => {
+      const vals = cols.map(fn);
+      const differs = new Set(vals).size > 1;
+      return '<tr><th>' + label + '</th>' + vals.map((v) => `<td${differs ? ' class="cmp-diff"' : ''}>${v}</td>`).join('') + '</tr>';
+    }).join('');
+    box.innerHTML = '<h3>Compare with similar in-stock guns</h3><p class="meta">Suggested for you — same caliber, similar type. Highlighted cells are where they differ, so you can see the choice at a glance. Still unsure? Call (678) 691-6375 and we will talk it through.</p><div style="overflow-x:auto"><table class="specs cmp">' + thead + tbody + '</table></div>';
+  } catch (e) { /* compare is an enhancement — a failed fetch hides it */ }
+}
 /* Share a product (2026-11-03): one tap to send this exact gun to a
    spouse, friend, or FFL dealer. Phone: native share sheet (WhatsApp,
    text, email, etc.). Desktop / no share sheet: copy the product link

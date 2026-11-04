@@ -224,3 +224,7 @@ body.home .tile p { color: #dddddd; }
 .plb-prev, .plb-next { top: 50%; transform: translateY(-50%); width: 48px; height: 48px; font-size: 34px; }
 .plb-prev { left: 16px; }
 .plb-next { right: 16px; }
+
+/* Compare similar (2026-11-03): differing cells highlighted, table scrolls on mobile */
+table.cmp { min-width: 560px; }
+table.cmp td.cmp-diff { background: #fff3cd; font-weight: 600; }
