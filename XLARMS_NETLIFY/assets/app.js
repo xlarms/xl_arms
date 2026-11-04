@@ -591,7 +591,7 @@ async function initProduct() {
     </div>
     <div id="plightbox" class="plightbox" onclick="if (event.target === this) closePgLightbox()">
       <button class="plb-btn plb-close" onclick="closePgLightbox()" aria-label="Close">×</button>
-      ${(p.images || []).length > 1 ? `<button class="plb-btn plb-prev" onclick="pgStep(-1)" aria-label="Previous image">‹</button><button class="plb-btn plb-next" onclick="pgStep(1)" aria-label="Next image">›</button>` : ''}
+      ${(p.images || []).length > 1 ? `<button class="plb-btn plb-prev" onclick="pgStep(-1)" aria-label="Previous image">‹</button><button class="plb-btn plb-next" onclick="pgStep(1)" aria-label="Next image">›</button><span id="plbCount" class="plb-count"></span>` : ''}
       <img id="plbImg" src="" alt="">
     </div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
@@ -626,6 +626,8 @@ function setPgImage(i) {
   document.querySelectorAll('.pthumb').forEach((t, j) => t.classList.toggle('active', j === i));
   const lb = document.getElementById('plbImg');
   if (lb) lb.src = (window.__pgHi || [])[i] || imgs[i];
+  const cnt = document.getElementById('plbCount');
+  if (cnt && imgs.length > 1) cnt.textContent = (i + 1) + ' / ' + imgs.length;
 }
 function openPgLightbox(i) {
   const imgs = window.__pgImgs || [];
@@ -645,6 +647,17 @@ function pgStep(d) {
   if (imgs.length < 2) return;
   setPgImage((window.__pgIdx + d + imgs.length) % imgs.length);
 }
+/* Mobile lightbox swipe (2026-11-03): swipe left = next photo, right = previous, 50px threshold. */
+let __pgTouchX = null;
+document.addEventListener('touchstart', (e) => {
+  const box = document.getElementById('plightbox');
+  if (box && box.classList.contains('open')) __pgTouchX = e.touches[0].clientX;
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (__pgTouchX === null) return;
+  const dx = e.changedTouches[0].clientX - __pgTouchX; __pgTouchX = null;
+  if (Math.abs(dx) > 50) pgStep(dx < 0 ? 1 : -1);
+}, { passive: true });
 document.addEventListener('keydown', (e) => {
   const box = document.getElementById('plightbox');
   if (!box || !box.classList.contains('open')) return;
