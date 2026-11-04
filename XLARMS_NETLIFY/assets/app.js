@@ -596,6 +596,7 @@ async function initProduct() {
     </div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
     <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
+    <p><button class="btn btn-dark" onclick="shareProduct()">Share this gun →</button> <span id="shareMsg" class="meta"></span></p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
       <tr><th>Model</th><td>${p.model}</td></tr>
@@ -662,6 +663,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); initFFLFinder(); updateCartBadge();
 });
+/* Share a product (2026-11-03): one tap to send this exact gun to a
+   spouse, friend, or FFL dealer. Phone: native share sheet (WhatsApp,
+   text, email, etc.). Desktop / no share sheet: copy the product link
+   to the clipboard. No third-party share buttons, no trackers — the
+   product URL already carries the SKU, so the link opens this gun. */
+async function shareProduct() {
+  const msg = document.getElementById('shareMsg');
+  const url = location.href;
+  const text = document.title.replace(/ \| XL Arms$/, '') + ' at XL Arms — ' + url;
+  try {
+    if (navigator.share) { await navigator.share({ title: document.title, text: text, url: url }); if (msg) msg.textContent = 'Shared.'; return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; /* fall through to copy */ }
+  try {
+    await navigator.clipboard.writeText(url);
+    if (msg) msg.textContent = 'Link copied — paste it anywhere to share this gun.';
+  } catch (e) {
+    if (msg) msg.innerHTML = 'Copy this link: <span style="word-break:break-all">' + url.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
+  }
+}
 /* FFL dealer finder (2026-11-03): ZIP/city/state search over the RSR
    dealer list via /api/ffl-dealers. Sorted by ZIP closeness when a ZIP
    is given, otherwise state/city/name. No license numbers, no phone/email
