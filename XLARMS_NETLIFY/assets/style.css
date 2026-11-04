@@ -227,4 +227,5 @@ body.home .tile p { color: #dddddd; }
 
 /* Compare similar (2026-11-03): differing cells highlighted, table scrolls on mobile */
 table.cmp { min-width: 560px; }
-table.cmp td.cmp-diff { background: #fff3cd; font-weight: 600; }
+table.cmp td.cmp-diff { background: #fff3cd; color: #111111; font-weight: 600; }
+table.cmp td.cmp-diff a { color: #8a1216; }
