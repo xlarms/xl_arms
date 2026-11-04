@@ -591,8 +591,8 @@ async function initProduct() {
     </div>
     <div id="plightbox" class="plightbox" onclick="if (event.target === this) closePgLightbox()">
       <button class="plb-btn plb-close" onclick="closePgLightbox()" aria-label="Close">×</button>
-      ${(p.images || []).length > 1 ? `<button class="plb-btn plb-prev" onclick="pgStep(-1)" aria-label="Previous image">‹</button><button class="plb-btn plb-next" onclick="pgStep(1)" aria-label="Next image">›</button><span id="plbCount" class="plb-count"></span>` : ''}
       <img id="plbImg" src="" alt="">
+      ${(p.images || []).length > 1 ? `<div class="plb-bar"><button class="plb-btn plb-bar-btn" onclick="pgStep(-1)" aria-label="Previous image">‹ Previous</button><span id="plbCount" class="plb-count"></span><button class="plb-btn plb-bar-btn" onclick="pgStep(1)" aria-label="Next image">Next ›</button></div>` : ''}
     </div>
     <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
     <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
