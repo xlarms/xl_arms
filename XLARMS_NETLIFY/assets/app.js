@@ -660,5 +660,34 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = open ? 'Hide filters' : 'Show filters';
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); updateCartBadge();
+  initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); initFFLFinder(); updateCartBadge();
 });
+/* FFL dealer finder (2026-11-03): ZIP/city/state search over the RSR
+   dealer list via /api/ffl-dealers. Sorted by ZIP closeness when a ZIP
+   is given, otherwise state/city/name. No license numbers, no phone/email
+   — those are not in the source file. */
+async function initFFLFinder() {
+  const form = document.getElementById('fflSearch'); if (!form) return;
+  const out = document.getElementById('fflResults'); if (!out) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const zip = (document.getElementById('fflZip') || {}).value || '';
+    const city = (document.getElementById('fflCity') || {}).value || '';
+    const state = (document.getElementById('fflState') || {}).value || '';
+    out.innerHTML = '<p>Searching dealers…</p>';
+    try {
+      const params = new URLSearchParams();
+      if (zip.trim()) params.set('zip', zip.trim());
+      if (city.trim()) params.set('city', city.trim());
+      if (state.trim()) params.set('state', state.trim());
+      const res = await fetch('/api/ffl-dealers?' + params.toString());
+      const d = await res.json();
+      if (!d.dealers || !d.dealers.length) { out.innerHTML = '<p>No dealers found in our network for that search. Try a nearby ZIP or a state search, or call (678) 691-6375 — we can still ship to a licensed dealer not on this list.</p>'; return; }
+      out.innerHTML = '<p>' + d.total + ' dealer' + (d.total === 1 ? '' : 's') + ' found' + (d.totalInList ? ' (from ' + d.totalInList + ' in our network list)' : '') + '. Confirm the dealer accepts transfers and their fee before ordering.</p>' + d.dealers.map((x) => {
+        const addr = [x.street, x.city, x.state, x.zip].filter(Boolean).join(', ');
+        const maps = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+        return '<div class="cartitem"><div><strong>' + esc(x.name) + '</strong><div class="meta">' + esc(addr) + '</div><div><a href="' + maps + '" target="_blank" rel="noopener">Get directions →</a></div></div></div>';
+      }).join('');
+    } catch (err) { out.innerHTML = '<p>Dealer search could not load right now — please call (678) 691-6375 and we will help find a dealer near you.</p>'; }
+  });
+}
