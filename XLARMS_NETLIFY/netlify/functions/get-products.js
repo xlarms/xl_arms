@@ -152,9 +152,35 @@ async function loadImageManifest(event) {
   return null;
 }
 
+// PRODUCT-PAGE PRE-INDEX (2026-11-04, part 2): a SKU lookup first tries
+// the per-letter full-index chunk in Blobs (built by
+// full-index-build-background.js from the live catalog). One chunk is
+// ~1/26th of the catalog, so it loads in a fraction of the full-catalog
+// time, with the full record (description, features, hi-res, Prop 65).
+// If the chunk is missing, this returns null and the caller falls back
+// to the full catalog load — slow, never broken.
+async function loadSkuChunk(event, sku) {
+  try {
+    const { getStore, connectLambda } = require('@netlify/blobs');
+    try { connectLambda(event); } catch (e) { /* non-Lambda context */ }
+    const first = String(sku || '')[0] ? String(sku)[0].toUpperCase() : '0';
+    const key = /^[A-Z]$/.test(first) ? first : '0';
+    const chunk = await getStore('xl-arms-catalog').get(`full-index-${key}.json`, { type: 'json' });
+    if (chunk && Array.isArray(chunk.products) && chunk.products.length > 0) return chunk.products;
+  } catch (e) { /* fall through to full catalog */ }
+  return null;
+}
 exports.handler = async (event) => {
   try {
     const q = event.queryStringParameters || {};
+    if (q.sku) {
+      const chunk = await loadSkuChunk(event, q.sku);
+      if (chunk) {
+        const found = chunk.map(cleanProduct).find((p) => String(p.sku).toLowerCase() === String(q.sku).toLowerCase());
+        if (found) return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [found], total: 1, page: 1, pageSize: 1 }) };
+      }
+      // Chunk missing or SKU not in it — fall through to full catalog below.
+    }
     const useIndex = !q.sku; // product page needs the full record — see loadCatalog
     const loaded = await loadCatalog(event, useIndex);
     const all = loaded.products.map(cleanProduct);
