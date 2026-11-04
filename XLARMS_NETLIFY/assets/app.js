@@ -683,7 +683,9 @@ async function initFFLFinder() {
       const res = await fetch('/api/ffl-dealers?' + params.toString());
       const d = await res.json();
       if (!d.dealers || !d.dealers.length) { out.innerHTML = '<p>No dealers found in our network for that search. Try a nearby ZIP or a state search, or call (678) 691-6375 — we can still ship to a licensed dealer not on this list.</p>'; return; }
-      out.innerHTML = '<p>' + d.total + ' dealer' + (d.total === 1 ? '' : 's') + ' found' + (d.totalInList ? ' (from ' + d.totalInList + ' in our network list)' : '') + '. Confirm the dealer accepts transfers and their fee before ordering.</p>' + d.dealers.map((x) => {
+      const shown = d.dealers.length;
+      const countText = d.total > shown ? 'Showing the closest ' + shown + ' of ' + d.total + ' dealers in our network list, closest first' : d.total + ' dealer' + (d.total === 1 ? '' : 's') + ' found';
+      out.innerHTML = '<p>' + countText + '. Confirm the dealer accepts transfers and their fee before ordering.</p>' + d.dealers.map((x) => {
         const addr = [x.street, x.city, x.state, x.zip].filter(Boolean).join(', ');
         const maps = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
         return '<div class="cartitem"><div><strong>' + esc(x.name) + '</strong><div class="meta">' + esc(addr) + '</div><div><a href="' + maps + '" target="_blank" rel="noopener">Get directions →</a></div></div></div>';
