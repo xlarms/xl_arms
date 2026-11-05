@@ -9,10 +9,13 @@
 // Actions (all under /.netlify/functions/intake-view):
 //   GET  ?action=list
 //        → [{ id, fullName, product, orderRef, pickupDay, submitted_at,
-//             pickup_at, status }] — metadata only, no photo, no pre-signature.
+//             pickup_at, status }] — metadata only, no photo, no pre-signature,
+//             and NO 4473 answers.
 //   GET  ?action=detail&id=<id>
 //        → full record + short-lived signed photo links (15 minutes) for
-//          that ONE submission only.
+//          that ONE submission only. The full record includes the complete
+//          Form 4473 Section A pre-copy (form4473) and the pre-signature —
+//          staff only, never in a list response and never in an email.
 //   GET  ?action=photo&id=<id>&side=front|back&token=<signed token>
 //        → streams the ID photo bytes. The token is HMAC-signed with the
 //          staff secret and expires 15 minutes after it is issued.

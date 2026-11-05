@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Staff Intake — XL Arms (staff only)</title>
+<meta name="description" content="Staff-only pickup intake list. Not linked from any public page.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css?v=20261103c">
+</head>
+<body>
+<div class="topbar"><div class="wrap"><span>Premium Firearms &amp; Tactical Gear — Norcross, GA</span><span><a href="account.html">Account</a><a href="index.html#help">Help</a><a href="ffl.html">FFL Dealers</a><a href="contact.html">Contact Us</a></span></div></div>
+<header><div class="wrap">
+  <div class="headrow">
+    <a class="logo" href="index.html"><img src="images/logo.png" alt="XL Arms logo" onerror="this.style.display='none'"></a>
+    <form class="headsearch" role="search" action="shop.html"><input type="search" name="q" placeholder="Search by keyword, brand, model or SKU — e.g. Glock 19, 9mm" aria-label="Search products"><button type="submit">Search</button></form>
+    <div class="headcontact"><a href="tel:+16786916375">(678) 691-6375</a><br>Norcross, GA<br>7 days a week 10am–6pm EST</div>
+    <a class="cartlink" href="cart.html">🛒 Cart <span id="cartCount" class="cartcount">0</span></a>
+  </div>
+  <nav><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a><a href="index.html#featured" class="deals">Daily Deals</a></nav>
+</div></header>
+<main class="wrap">
+  <h1>Staff — Pickup Intakes</h1>
+  <p><strong>Staff only.</strong> This page is not linked from anywhere on the public site — staff reach it only from the email alert link.</p>
+
+  <div id="lockBox" style="max-width:480px;border:2px solid #333;padding:16px;border-radius:8px;margin:16px 0">
+    <h2 style="margin-top:0">Enter the staff secret code</h2>
+    <p>Type the staff secret code to open the intake list. The code is sent with your request and is kept only for this browser session — it is never put in the page address and never saved on this computer.</p>
+    <label>Staff secret code
+      <input id="secretInput" type="password" autocomplete="off" style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px">
+    </label>
+    <p><button id="unlockBtn" type="button" style="padding:12px 20px;font-size:16px">Unlock</button></p>
+    <p id="lockError" style="color:#b00020"></p>
+  </div>
+
+  <div id="app" style="display:none">
+    <p><button id="lockBtn" type="button">Lock this page</button> <span id="appNote"></span></p>
+
+    <div id="listView">
+      <h2>Intakes</h2>
+      <p id="listNote">Loading…</p>
+      <div id="listItems" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
+    <div id="detailView" style="display:none">
+      <p><button id="backBtn" type="button">← Back to list</button></p>
+      <h2 id="detailTitle">Submission</h2>
+      <p id="detailMeta"></p>
+      <div id="detailBody"></div>
+      <div id="photoBox"></div>
+      <p><button id="pickedUpBtn" type="button" style="padding:12px 20px;font-size:16px">Mark picked up</button> <span id="pickedUpNote"></span></p>
+      <p class="meta">Photo links expire after 15 minutes — reload the submission to get fresh links. ID photos and 4473 answers are deleted automatically 30 days after pickup, or 30 days after submission if never picked up.</p>
+    </div>
+  </div>
+</main>
+<footer><div class="wrap"><div class="cols">
+  <div><h4>Shop</h4><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a></div>
+  <div><h4>Help</h4><a href="index.html#help">Help Center</a><a href="buying-guide.html">Buying a Gun Online</a><a href="ffl.html">FFL Dealers &amp; Transfers</a><a href="shipping.html">Shipping &amp; Restrictions</a><a href="returns.html">Returns</a><a href="warranty.html">Warranty</a></div>
+  <div><h4>Legal</h4><a href="terms.html">Terms &amp; Conditions</a><a href="privacy.html">Privacy Policy</a><a href="contact.html">Contact Us</a><a href="account.html">My Account</a><a href="cart.html">Cart</a></div>
+  <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>7 days a week 10am–6pm EST</span></div>
+  <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><p class="meta">Secure checkout coming soon — payment gateway to be confirmed before launch.</p></div>
+</div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. <a href="credits.html">Photo Credits</a>. Prices are MAP/MSRP.</div></div></footer>
+<script>
+(function(){
+var API='/.netlify/functions/intake-view';
+var SECRET_KEY='xl_intake_secret'; // sessionStorage only — never localStorage, never the URL
+var secret=sessionStorage.getItem(SECRET_KEY)||'';
+var currentId=null;
+
+var Q11={
+  a:'Are you the actual transferee/buyer of the firearm(s) listed on this form?',
+  b:'Are you under indictment or information in any court for a felony, or any other crime, for which the judge could imprison you for more than one year?',
+  c:'Have you ever been convicted in any court of a felony, or any other crime, for which the judge could have imprisoned you for more than one year, even if you received a shorter sentence including probation?',
+  d:'Are you a fugitive from justice?',
+  e:'Are you an unlawful user of, or addicted to, marijuana or any depressant, stimulant, narcotic drug, or any other controlled substance?',
+  f:'Have you ever been adjudicated as a mental defective OR have you ever been committed to a mental institution?',
+  g:'Have you been discharged from the Armed Forces under dishonorable conditions?',
+  h:'Are you subject to a court order restraining you from harassing, stalking, or threatening your child or an intimate partner or child of such partner?',
+  i:'Have you ever been convicted in any court of a misdemeanor crime of domestic violence?',
+  j:'Have you ever renounced your United States citizenship?',
+  k:'Are you an alien illegally in the United States?',
+  l:'Are you an alien admitted to the United States under a nonimmigrant visa?'
+};
+
+function el(tag,text){var n=document.createElement(tag);if(text!=null)n.textContent=text;return n;}
+function row(label,value){
+  var p=el('p');var b=el('strong',label+': ');p.appendChild(b);p.appendChild(el('span',value==null||value===''?'—':String(value)));return p;
+}
+function section(title){
+  var h=el('h3',title);document.getElementById('detailBody').appendChild(h);return h;
+}
+function headers(){return {'X-Intake-Secret':secret};}
+async function api(action,opts){
+  opts=opts||{};
+  var url=API+'?action='+encodeURIComponent(action)+(opts.id?('&id='+encodeURIComponent(opts.id)):'');
+  var res=await fetch(url,{method:opts.method||'GET',headers:headers(),body:opts.body?JSON.stringify(opts.body):undefined});
+  var data={};try{data=await res.json();}catch(_){}
+  if(!res.ok)throw new Error((data&&data.error)||('Request failed ('+res.status+').'));
+  return data;
+}
+function showApp(){
+  document.getElementById('lockBox').style.display='none';
+  document.getElementById('app').style.display='block';
+}
+function lock(){
+  secret='';sessionStorage.removeItem(SECRET_KEY);
+  document.getElementById('secretInput').value='';
+  document.getElementById('app').style.display='none';
+  document.getElementById('lockBox').style.display='block';
+  document.getElementById('lockError').textContent='';
+}
+function showList(){
+  currentId=null;
+  document.getElementById('detailView').style.display='none';
+  document.getElementById('listView').style.display='block';
+  loadList();
+}
+async function loadList(){
+  var note=document.getElementById('listNote');
+  var box=document.getElementById('listItems');
+  note.textContent='Loading…';box.innerHTML='';
+  try{
+    var data=await api('list');
+    if(!data.items||!data.items.length){note.textContent='No intakes yet.';return;}
+    note.textContent=data.count+' intake(s). Newest first. Click one to open it.';
+    data.items.forEach(function(it){
+      var card=document.createElement('button');
+      card.type='button';
+      card.style.cssText='text-align:left;padding:12px;border:1px solid #bbb;border-radius:8px;background:#fff;cursor:pointer';
+      var t=el('strong',it.fullName||'(no name)');
+      var s=el('span',' — '+(it.product||'')+' — order ref: '+(it.orderRef||'(none)')+' — pickup: '+(it.pickupDay||'(none)')+' — submitted: '+(it.submitted_at||'')+' — status: '+(it.status||''));
+      card.appendChild(t);card.appendChild(s);
+      card.addEventListener('click',function(){loadDetail(it.id);});
+      box.appendChild(card);
+    });
+  }catch(err){
+    note.textContent='Could not load the list: '+err.message;
+    if(/403|Staff access/.test(err.message)){lock();}
+  }
+}
+async function loadDetail(id){
+  currentId=id;
+  document.getElementById('listView').style.display='none';
+  var dv=document.getElementById('detailView');
+  dv.style.display='block';
+  document.getElementById('detailBody').innerHTML='';
+  document.getElementById('photoBox').innerHTML='';
+  document.getElementById('pickedUpNote').textContent='';
+  document.getElementById('detailTitle').textContent='Loading…';
+  try{
+    var data=await api('detail',{id:id});
+    var r=data.record;
+    var f=r.form4473||null;
+    document.getElementById('detailTitle').textContent=r.fullName||'(no name)';
+    document.getElementById('detailMeta').textContent='Submitted: '+(r.submitted_at||'—')+' • Status: '+(r.status||'—')+(r.pickup_at?(' • Picked up: '+r.pickup_at):'')+' • ID: '+r.id;
+    var body=document.getElementById('detailBody');
+    section('Order');
+    body.appendChild(row('Product',r.product));
+    body.appendChild(row('Order ref',r.orderRef));
+    body.appendChild(row('Pickup day',r.pickupDay));
+    section('Contact');
+    body.appendChild(row('Phone',r.phone));
+    body.appendChild(row('Email',r.email));
+    if(!f){
+      var warn=el('p','This submission was sent before the full Form 4473 fields were added — only name, contact and ID photo are on file.');
+      warn.style.color='#b00020';body.appendChild(warn);
+    }else{
+      section('Form 4473 — transferee (pre-copy)');
+      body.appendChild(row('Full legal name',[f.firstName,f.middleName,f.lastName].filter(Boolean).join(' ')));
+      body.appendChild(row('Current residence address',[f.addressStreet,f.addressCity,f.addressState,f.addressZip].filter(Boolean).join(', ')));
+      body.appendChild(row('Place of birth',f.placeOfBirth));
+      body.appendChild(row('Height',(f.heightFt||'')+"' "+(f.heightIn||'')+'"'));
+      body.appendChild(row('Weight',f.weightLbs?f.weightLbs+' lbs.':''));
+      body.appendChild(row('Sex',f.sex));
+      body.appendChild(row('Date of birth',f.dob));
+      body.appendChild(row('Social Security Number',f.ssn));
+      body.appendChild(row('UPIN',f.upin));
+      body.appendChild(row('Ethnicity',f.ethnicity));
+      body.appendChild(row('Race',(f.race||[]).join(', ')));
+      section('Eligibility questions 11a–11l');
+      var tbl=document.createElement('table');
+      tbl.style.cssText='border-collapse:collapse;width:100%';
+      Object.keys(Q11).forEach(function(k){
+        var tr=document.createElement('tr');
+        var q=document.createElement('td');q.style.cssText='border:1px solid #ccc;padding:8px;vertical-align:top';q.textContent='11'+k+'. '+Q11[k];
+        var a=document.createElement('td');a.style.cssText='border:1px solid #ccc;padding:8px;white-space:nowrap';
+        var ans=(f.q11||{})[k]||'—';
+        a.textContent=ans==='yes'?'Yes':(ans==='no'?'No':'—');
+        var flagged=(k==='a'&&ans==='no')||(k!=='a'&&ans==='yes');
+        if(flagged){a.style.color='#b00020';a.style.fontWeight='bold';a.textContent+=' — needs staff review';}
+        tr.appendChild(q);tr.appendChild(a);tbl.appendChild(tr);
+      });
+      body.appendChild(tbl);
+      body.appendChild(el('p','Flagged answers do not decide anything on their own — staff verify them with the customer on the official Form 4473 at pickup.'));
+      if(f.q11&&f.q11.l==='yes'){
+        section('Question 12 — nonimmigrant exception');
+        body.appendChild(row('Falls within an exception',f.q12==='yes'?'Yes':(f.q12==='no'?'No':'—')));
+        body.appendChild(row('Which exception',f.q12Detail));
+      }
+      section('Residence & citizenship');
+      body.appendChild(row('State of residence',f.stateOfResidence));
+      body.appendChild(row('Country of citizenship',f.countryOfCitizenship));
+      body.appendChild(row('Alien / admission number & status',f.nonCitizenDetail));
+    }
+    section('Pre-signature');
+    body.appendChild(row('Pre-signature (typed)',r.preSignature));
+    body.appendChild(el('p','Pre-copy only — the customer signs the official Form 4473 again in person at pickup.'));
+    var pb=document.getElementById('photoBox');
+    pb.appendChild(el('h3','ID photos'));
+    if(data.photos&&data.photos.front){
+      var img=document.createElement('img');
+      img.src=data.photos.front;img.alt='Front of ID';img.style.cssText='max-width:100%;border:1px solid #bbb;border-radius:8px;margin:8px 0';
+      pb.appendChild(el('p','Front of ID:'));pb.appendChild(img);
+    }else{pb.appendChild(el('p','Front of ID: not on file.'));}
+    if(data.photos&&data.photos.back){
+      var img2=document.createElement('img');
+      img2.src=data.photos.back;img2.alt='Back of ID';img2.style.cssText='max-width:100%;border:1px solid #bbb;border-radius:8px;margin:8px 0';
+      pb.appendChild(el('p','Back of ID:'));pb.appendChild(img2);
+    }
+    var picked=document.getElementById('pickedUpBtn');
+    picked.disabled=!!r.pickup_at;
+    picked.textContent=r.pickup_at?'Already picked up':'Mark picked up';
+  }catch(err){
+    document.getElementById('detailTitle').textContent='Could not open this submission';
+    document.getElementById('detailBody').appendChild(el('p',err.message));
+  }
+}
+document.getElementById('unlockBtn').addEventListener('click',async function(){
+  var v=document.getElementById('secretInput').value||'';
+  var err=document.getElementById('lockError');
+  if(!v){err.textContent='Type the staff secret code first.';return;}
+  secret=v;
+  err.textContent='Checking…';
+  try{
+    await api('list');
+    sessionStorage.setItem(SECRET_KEY,secret);
+    err.textContent='';
+    showApp();
+    var params=new URLSearchParams(window.location.search);
+    var id=params.get('id');
+    if(id){loadDetail(id);}else{showList();}
+  }catch(e){
+    secret='';
+    err.textContent='That code was not accepted. Try again.';
+  }
+});
+document.getElementById('secretInput').addEventListener('keydown',function(e){if(e.key==='Enter'){document.getElementById('unlockBtn').click();}});
+document.getElementById('lockBtn').addEventListener('click',lock);
+document.getElementById('backBtn').addEventListener('click',showList);
+document.getElementById('pickedUpBtn').addEventListener('click',async function(){
+  if(!currentId)return;
+  var note=document.getElementById('pickedUpNote');
+  note.textContent='Saving…';
+  try{
+    var data=await api('pickedup',{method:'POST',body:{id:currentId}});
+    note.textContent='Marked picked up. Record + ID photo will be deleted 30 days after pickup.';
+    loadDetail(currentId);
+  }catch(err){note.textContent='Could not mark picked up: '+err.message;}
+});
+// If a secret is already stored for this browser session, unlock straight away.
+if(secret){
+  showApp();
+  var p=new URLSearchParams(window.location.search);
+  var pid=p.get('id');
+  if(pid){loadDetail(pid);}else{showList();}
+}
+})();
+</script>
+</body>
+</html>

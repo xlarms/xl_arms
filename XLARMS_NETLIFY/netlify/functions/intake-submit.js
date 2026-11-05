@@ -7,12 +7,20 @@
 //
 // What is stored per submission (key intake-private/<id>/):
 //   record.json   — name, contact, order ref, pickup day, typed pre-signature,
-//                   submitted_at, pickup_at (null until staff marks picked up), status
+//                   plus form4473: the full Form 4473 Section A transferee
+//                   information (address, place of birth, height, weight, sex,
+//                   date of birth, SSN/UPIN if given, ethnicity, race,
+//                   questions 11a–11l, question 12 if applicable, state of
+//                   residence, country of citizenship, non-citizen detail if
+//                   applicable), submitted_at, pickup_at (null until staff
+//                   marks picked up), status
 //   id-front.jpg  — front of Georgia ID/license (required)
 //   id-back.jpg   — back of ID (optional)
 // This is a PRE-COPY only — NOT the official Form 4473. No eligibility
-// questions are asked. The official form is signed in person at pickup and
-// lives in XL Arms' own acquisition/disposition log, never in this store.
+// questions are asked on the official form in person at pickup. The official
+// form is signed in person at pickup and lives in XL Arms' own
+// acquisition/disposition log, never in this store. No dealer-side
+// (Section B/D) fields are collected here.
 //
 // Retention (Jonathan, 2026-11-05): ID photo + record are deleted 30 days
 // after pickup_at if picked up, or 30 days after submitted_at if never
@@ -106,7 +114,7 @@ exports.handler = async (event) => {
       return fail('We could not read the form. Please try again or call ' + PHONE + '.');
     }
 
-    const fullName = String(body.fullName || '').trim();
+    const fullName = [String(body.firstName || '').trim(), String(body.middleName || '').trim(), String(body.lastName || '').trim()].filter(Boolean).join(' ');
     const phone = String(body.phone || '').trim();
     const email = String(body.email || '').trim();
     const product = String(body.product || '').trim();
@@ -114,10 +122,64 @@ exports.handler = async (event) => {
     const pickupDay = String(body.pickupDay || '').trim();
     const preSignature = String(body.preSignature || '').trim();
 
-    if (!fullName) return fail('Full legal name is required.');
+    // --- Form 4473 Section A (pre-copy) fields ---
+    const s = (v) => String(v == null ? '' : v).trim();
+    const f4473 = {
+      lastName: s(body.lastName),
+      firstName: s(body.firstName),
+      middleName: s(body.middleName),
+      addressStreet: s(body.addressStreet),
+      addressCity: s(body.addressCity),
+      addressState: s(body.addressState),
+      addressZip: s(body.addressZip),
+      placeOfBirth: s(body.placeOfBirth),
+      heightFt: s(body.heightFt),
+      heightIn: s(body.heightIn),
+      weightLbs: s(body.weight),
+      sex: s(body.sex),
+      dob: s(body.dob),
+      ssn: s(body.ssn),
+      upin: s(body.upin),
+      ethnicity: s(body.ethnicity),
+      race: Array.isArray(body.race) ? body.race.map((r) => s(r)).filter(Boolean) : [],
+      q11: {
+        a: s(body.q11a), b: s(body.q11b), c: s(body.q11c), d: s(body.q11d),
+        e: s(body.q11e), f: s(body.q11f), g: s(body.q11g), h: s(body.q11h),
+        i: s(body.q11i), j: s(body.q11j), k: s(body.q11k), l: s(body.q11l),
+      },
+      q12: s(body.q12),
+      q12Detail: s(body.q12Detail),
+      stateOfResidence: s(body.stateOfResidence),
+      countryOfCitizenship: s(body.countryOfCitizenship),
+      nonCitizenDetail: s(body.nonCitizenDetail),
+    };
+    const yn = (v) => v === 'yes' || v === 'no';
+    const isUSCitizen = ['united states', 'usa', 'us', 'u.s.', 'u.s.a.', 'america'].includes(f4473.countryOfCitizenship.toLowerCase());
+
+    if (!f4473.lastName || !f4473.firstName) return fail('Full legal name is required.');
     if (!phone) return fail('Phone number is required.');
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('A valid email address is required.');
     if (!product) return fail('Product you ordered is required.');
+    if (!f4473.addressStreet || !f4473.addressCity || !f4473.addressState || !f4473.addressZip) return fail('Current residence address (street, city, state, ZIP) is required.');
+    if (/p\.?\s*o\.?\s*box/i.test(f4473.addressStreet)) return fail('Your residence address cannot be a P.O. Box.');
+    if (!f4473.placeOfBirth) return fail('Place of birth is required.');
+    const ft = parseInt(f4473.heightFt, 10);
+    const inch = parseInt(f4473.heightIn, 10);
+    const lbs = parseInt(f4473.weightLbs, 10);
+    if (Number.isNaN(ft) || ft < 2 || ft > 8 || Number.isNaN(inch) || inch < 0 || inch > 11) return fail('Height (feet and inches) is required.');
+    if (Number.isNaN(lbs) || lbs < 50 || lbs > 999) return fail('Weight in pounds is required.');
+    if (f4473.sex !== 'Male' && f4473.sex !== 'Female') return fail('Sex is required.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f4473.dob) || Number.isNaN(Date.parse(f4473.dob))) return fail('Date of birth is required.');
+    if (f4473.ssn && !/^\d{3}-?\d{2}-?\d{4}$/.test(f4473.ssn)) return fail('Social Security Number must be 9 digits if you give one.');
+    if (f4473.ethnicity !== 'Hispanic or Latino' && f4473.ethnicity !== 'Not Hispanic or Latino') return fail('Ethnicity is required.');
+    if (!f4473.race.length) return fail('Please select at least one race.');
+    for (const k of Object.keys(f4473.q11)) {
+      if (!yn(f4473.q11[k])) return fail(`Question 11${k} must be answered Yes or No.`);
+    }
+    if (f4473.q11.l === 'yes' && !yn(f4473.q12)) return fail('Question 12 must be answered Yes or No.');
+    if (!f4473.stateOfResidence) return fail('State of residence is required.');
+    if (!f4473.countryOfCitizenship) return fail('Country of citizenship is required.');
+    if (!isUSCitizen && !f4473.nonCitizenDetail) return fail('If you are not a citizen of the United States, your alien or admission number and immigration status are required.');
     if (!preSignature) return fail('Pre-signature is required — type your full name as on your ID.');
     if (preSignature.toLowerCase() !== fullName.toLowerCase()) {
       return fail('Pre-signature must match the full legal name on the form.');
@@ -142,12 +204,16 @@ exports.handler = async (event) => {
       id,
       kind: 'pickup-intake-pre-copy',
       fullName,
+      lastName: f4473.lastName,
+      firstName: f4473.firstName,
+      middleName: f4473.middleName,
       phone,
       email,
       product,
       orderRef,
       pickupDay,
       preSignature,
+      form4473: f4473,
       submitted_at: submittedAt,
       pickup_at: null,
       status: 'received',
@@ -174,7 +240,9 @@ exports.handler = async (event) => {
     // submission — the intake is already safely stored above). Sends from
     // storage@xlarms.us via HostGator SMTP to info@xlarms.us. The email
     // carries name / product / order ref / pickup day only — NO ID photo,
-    // NO pre-signature. Staff open the photo in intake-view.
+    // NO 4473 answers, NO pre-signature. It includes a link to the staff
+    // page: staff open the link, type the staff secret code, and the
+    // submission opens. Staff open the full 4473 detail + photos there.
     if (process.env.INTAKE_SMTP_PASS) {
       try {
         const mailer = nodemailer.createTransport({
@@ -183,11 +251,12 @@ exports.handler = async (event) => {
           secure: true,
           auth: { user: ALERT_FROM, pass: process.env.INTAKE_SMTP_PASS },
         });
+        const staffLink = `https://xlarms.us/staff-intake.html?id=${encodeURIComponent(id)}`;
         await mailer.sendMail({
           from: ALERT_FROM,
           to: ALERT_TO,
           subject: `New pickup intake: ${fullName} — ${orderRef || 'no order ref'}`,
-          text: `New pickup intake received.\n\nName: ${fullName}\nProduct: ${product}\nOrder ref: ${orderRef || '(none)'}\nPickup day: ${pickupDay || '(none)'}\nPhone: ${phone}\nEmail: ${email}\nSubmission id: ${id}\n\nOpen it in the staff intake list (intake-view). Do not reply to this email with ID photos.`,
+          text: `New pickup intake received.\n\nName: ${fullName}\nProduct: ${product}\nOrder ref: ${orderRef || '(none)'}\nPickup day: ${pickupDay || '(none)'}\nSubmission id: ${id}\n\nOpen the submission here:\n${staffLink}\n\nOpen the link, type the staff secret code, and the submission opens. Do not reply to this email with ID photos.`,
         });
       } catch (e) {
         console.error('intake-submit: alert email failed (submission already stored):', e && e.message);
