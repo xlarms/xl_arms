@@ -38,10 +38,11 @@
   <p><strong>This is NOT the official Form 4473.</strong> This page only sends your pickup information and ID photo ahead of time, so pickup is faster. <strong>You will still come in, bring your original Georgia ID/license, and sign the official Form 4473 in person at pickup — that step is required, and it cannot be done by email or from home.</strong></p>
   <p><strong>Pickup service fee (pickup orders only): $15.</strong> This is a service fee for the background check, not a deposit. Paid upfront when you submit this information. You still pay on pickup, not the full price online. Example: a $539 gun — you pay $15 upfront, then $524 at pickup after you pass, so a completed purchase costs no extra. If you are denied, including a delayed check that later comes back denied, the $15 service fee is kept, for the service performed. Once you have paid, there is no cancellation — the check runs immediately. If XL Arms cannot deliver the gun, the $15 is refunded. This fee does not apply to ship-to-FFL orders. Payment collection for this fee is not yet live — it will be collected through a firearms-friendly payment route once that is approved, and the exact payment step will be confirmed with you by phone before you are charged.</p>
   <p>No Adobe, no PDF to download, no form to email back. Just this page, on your phone.</p>
-  <form id="pickupForm" style="max-width:640px;display:flex;flex-direction:column;gap:12px">
+  <form id="pickupForm" novalidate style="max-width:640px;display:flex;flex-direction:column;gap:12px">
     <h2>Step 1 — Your order</h2>
-    <label>Order / phone order reference (if you have one)<input name="orderRef" placeholder="e.g. phone order date, or product name" style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
-    <label>Product you ordered<input name="product" placeholder="e.g. Glock 19 Gen5 9mm" required style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
+    <label>Order / phone order reference (if you have one — if not, put your phone number here)<input name="orderRef" placeholder="e.g. phone order date, or your phone number" style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
+    <label>What gun did you order? — type of gun (e.g. Glock 19 Gen5 9mm)<input name="product" placeholder="e.g. Glock 19 Gen5 9mm" required style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
+    <p style="font-size:14px;margin:-6px 0 0">If you don't know the exact model, write the make and type — e.g. Glock 43X 9mm.</p>
 
     <h2>Step 2 — Who is picking up</h2>
     <label>Last name (as on your ID)<input name="lastName" required style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
@@ -157,7 +158,7 @@
     <label>Front of Georgia ID/license<input name="idFront" type="file" accept="image/*" capture="environment" required style="width:100%;padding:12px;font-size:16px"></label>
     <label>Back of ID (optional)<input name="idBack" type="file" accept="image/*" capture="environment" style="width:100%;padding:12px;font-size:16px"></label>
     <label>Pre-signature — type your full name as on your ID (this is your pre-copy signature only, for preparation)<input name="preSignature" required placeholder="First Middle Last — as on your ID" style="width:100%;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px"></label>
-    <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" required> I understand this is pickup information / a pre-copy only, sent to XL Arms. I will bring my original ID and sign the official Form 4473 again in person at Norcross pickup.</label>
+    <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" id="ackBox" required> I understand this is pickup information / a pre-copy only, sent to XL Arms. I will bring my original ID and sign the official Form 4473 again in person at Norcross pickup.</label>
     <button type="submit" style="padding:14px;font-size:18px">Send pickup information</button>
     <p class="meta" id="pickupNote">Norcross office pickup only. We will call you to confirm your pickup time. Remember: this is a pre-copy only — the official Form 4473 is signed in person at pickup.</p>
   </form>
@@ -195,25 +196,137 @@ function toggleNonCitizen(){
 form.querySelectorAll('input[name="q11l"]').forEach(function(r){r.addEventListener('change',toggleQ12);});
 form.elements.countryOfCitizenship.addEventListener('input',toggleNonCitizen);
 toggleQ12();toggleNonCitizen();
-form.addEventListener('submit',async function(e){
-  e.preventDefault();
-  var note=document.getElementById('pickupNote');
-  var btn=this.querySelector('button[type="submit"]');
+  // --- Photo handling: shrink phone-camera photos before sending ---
+  // A phone camera photo is several MB; sent as base64 it is ~1/3 bigger
+  // again, which is slow on mobile data and can hit the function payload
+  // limit. So large photos are shrunk in the browser first (max 1600px on
+  // the longest side, JPEG quality 0.82 — still sharp enough to read an ID).
+  // Small photos are sent as-is. If shrinking fails for any reason, the
+  // original photo is sent instead, so this never blocks a submission.
+  function compressPhoto(file){
+    return new Promise(function(resolve,reject){
+      function finish(img){
+        try{
+          var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+          if(!w||!h){reject(new Error('Could not read the photo.'));return;}
+          var MAX=1600;
+          var scale=Math.min(1,MAX/Math.max(w,h));
+          var cw=Math.max(1,Math.round(w*scale)), ch=Math.max(1,Math.round(h*scale));
+          var canvas=document.createElement('canvas');
+          canvas.width=cw; canvas.height=ch;
+          canvas.getContext('2d').drawImage(img,0,0,cw,ch);
+          canvas.toBlob(function(blob){
+            if(!blob){reject(new Error('Could not read the photo.'));return;}
+            var r=new FileReader();
+            r.onload=function(){resolve({data:r.result,type:'image/jpeg'});};
+            r.onerror=function(){reject(new Error('Could not read the photo.'));};
+            r.readAsDataURL(blob);
+          },'image/jpeg',0.82);
+        }catch(e){reject(e);}
+      }
+      function loadViaImg(){
+        var url=URL.createObjectURL(file);
+        var img=new Image();
+        img.onload=function(){URL.revokeObjectURL(url);finish(img);};
+        img.onerror=function(){URL.revokeObjectURL(url);reject(new Error('Could not read the photo.'));};
+        img.src=url;
+      }
+      // createImageBitmap honours EXIF orientation (iPhone photos), where supported.
+      if(window.createImageBitmap){
+        createImageBitmap(file,{imageOrientation:'flip'}).then(finish,function(){loadViaImg();});
+      }else{
+        loadViaImg();
+      }
+    });
+  }
   function readFile(input){
     return new Promise(function(resolve,reject){
       var f=input.files&&input.files[0];
       if(!f){resolve(null);return;}
-      var r=new FileReader();
-      r.onload=function(){resolve({data:r.result,type:f.type});};
-      r.onerror=function(){reject(new Error('Could not read the photo.'));};
-      r.readAsDataURL(f);
+      if(f.size<=600*1024){
+        var r=new FileReader();
+        r.onload=function(){resolve({data:r.result,type:f.type});};
+        r.onerror=function(){reject(new Error('Could not read the photo.'));};
+        r.readAsDataURL(f);
+        return;
+      }
+      compressPhoto(f).then(resolve,function(){
+        // Shrinking failed — send the original photo instead of blocking.
+        var r2=new FileReader();
+        r2.onload=function(){resolve({data:r2.result,type:f.type});};
+        r2.onerror=function(){reject(new Error('Could not read the photo.'));};
+        r2.readAsDataURL(f);
+      });
     });
   }
-  // At least one race must be selected (native required does not work on a checkbox group).
-  var raceChecked=form.querySelectorAll('input[name="race"]:checked').length>0;
-  if(!raceChecked){note.textContent='Please select at least one race.';return;}
+  // --- Clear validation feedback ---
+  // The browser's native validation blocks the submit event silently when a
+  // required field is empty, so the customer sees nothing happen. The form
+  // has novalidate, so this check runs instead: it names the FIRST missing
+  // field, scrolls to it and focuses it, and never starts sending.
+  function fieldValue(name){var el=form.elements[name];return el?String(el.value||'').trim():'';}
+  function firstMissing(){
+    var i, name, label;
+    var textFields=[
+      ['product','Product you ordered — what gun did you order?'],
+      ['lastName','Last name'],
+      ['firstName','First name'],
+      ['phone','Phone'],
+      ['email','Email'],
+      ['addressStreet','Current residence address — street'],
+      ['addressCity','City'],
+      ['addressState','State'],
+      ['addressZip','ZIP code'],
+      ['placeOfBirth','Place of birth'],
+      ['heightFt','Height — feet'],
+      ['heightIn','Height — inches'],
+      ['weight','Weight (lbs.)'],
+      ['dob','Date of birth'],
+      ['stateOfResidence','State of residence'],
+      ['countryOfCitizenship','Country of citizenship'],
+      ['preSignature','Pre-signature']
+    ];
+    for(i=0;i<textFields.length;i++){
+      if(!fieldValue(textFields[i][0])) return {el:form.elements[textFields[i][0]],label:textFields[i][1]};
+    }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fieldValue('email'))) return {el:form.elements.email,label:'Email — a valid email address'};
+    var groups=[
+      ['sex','Sex'],['ethnicity','Ethnicity'],
+      ['q11a','Question 11a'],['q11b','Question 11b'],['q11c','Question 11c'],
+      ['q11d','Question 11d'],['q11e','Question 11e'],['q11f','Question 11f'],
+      ['q11g','Question 11g'],['q11h','Question 11h'],['q11i','Question 11i'],
+      ['q11j','Question 11j'],['q11k','Question 11k'],['q11l','Question 11l']
+    ];
+    for(i=0;i<groups.length;i++){
+      name=groups[i][0]; label=groups[i][1];
+      if(!radioVal(name)) return {el:form.querySelector('input[name="'+name+'"]'),label:label};
+    }
+    if(radioVal('q11l')==='yes'&&!radioVal('q12')) return {el:form.querySelector('input[name="q12"]'),label:'Question 12'};
+    var c=fieldValue('countryOfCitizenship').toLowerCase();
+    var isUS=['united states','usa','us','u.s.','u.s.a.','america'].indexOf(c)!==-1;
+    if(!isUS&&!fieldValue('nonCitizenDetail')) return {el:form.elements.nonCitizenDetail,label:'Alien / admission number and immigration status'};
+    if(!form.querySelectorAll('input[name="race"]:checked').length) return {el:form.querySelector('input[name="race"]'),label:'Race — select at least one'};
+    if(!(form.elements.idFront.files&&form.elements.idFront.files[0])) return {el:form.elements.idFront,label:'Front of Georgia ID/license photo'};
+    var ack=document.getElementById('ackBox');
+    if(ack&&!ack.checked) return {el:ack,label:'The acknowledgement at the end of the form'};
+    var full=[fieldValue('firstName'),fieldValue('middleName'),fieldValue('lastName')].filter(Boolean).join(' ');
+    if(fieldValue('preSignature').toLowerCase()!==full.toLowerCase()) return {el:form.elements.preSignature,label:'Pre-signature — it must match your full name as on your ID'};
+    return null;
+  }
+form.addEventListener('submit',async function(e){
+  e.preventDefault();
+  var note=document.getElementById('pickupNote');
+  var btn=this.querySelector('button[type="submit"]');
+  var missing=firstMissing();
+  if(missing){
+    note.textContent='Please fill in: '+missing.label+'.';
+    missing.el.scrollIntoView({behavior:'smooth',block:'center'});
+    try{missing.el.focus({preventScroll:true});}catch(_){missing.el.focus();}
+    return;
+  }
   btn.disabled=true;
-  note.textContent='Sending your pickup information…';
+  note.textContent='Preparing your photo…';
+  var timer=null;
   try{
     var front=await readFile(form.elements.idFront);
     var back=await readFile(form.elements.idBack);
@@ -255,15 +368,24 @@ form.addEventListener('submit',async function(e){
       idFront:front,
       idBack:back
     };
-    var res=await fetch('/.netlify/functions/intake-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    note.textContent='Sending your pickup information…';
+    var ctrl=new AbortController();
+    timer=setTimeout(function(){ctrl.abort();},90000);
+    var res=await fetch('/.netlify/functions/intake-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:ctrl.signal});
+    clearTimeout(timer); timer=null;
     var data={};
     try{data=await res.json();}catch(_){}
     if(!res.ok||!data.ok){throw new Error((data&&data.error)||'Send failed.');}
     form.innerHTML='<h2>Received — thank you</h2><p>We received your pickup information. We will call you to confirm your pickup time.</p><p>Bring your original Georgia ID/license and sign the official Form 4473 in person at pickup — that step is required. This pre-copy does not replace the official form.</p><p>Questions? Call <a href="tel:+16786916375">(678) 691-6375</a>, 7 days 10am–6pm EST.</p>';
     note.textContent='';
   }catch(err){
+    if(timer){clearTimeout(timer);timer=null;}
     btn.disabled=false;
-    note.textContent='We did not receive it — please call (678) 691-6375 and we will take your pickup information by phone. ('+(err&&err.message||'Send failed.')+')';
+    if(err&&err.name==='AbortError'){
+      note.textContent='Still sending after 90 seconds — please check your connection and try again, or call (678) 691-6375.';
+    }else{
+      note.textContent='We did not receive it — please call (678) 691-6375 and we will take your pickup information by phone. ('+(err&&err.message||'Send failed.')+')';
+    }
   }
 });
 })();

@@ -118,7 +118,12 @@ exports.handler = async (event) => {
     const phone = String(body.phone || '').trim();
     const email = String(body.email || '').trim();
     const product = String(body.product || '').trim();
-    const orderRef = String(body.orderRef || '').trim();
+    // Order reference: if the customer has no order number they put their
+    // phone number here instead (per the form label). If it is still blank,
+    // fill it with their phone number so the staff list and the alert-email
+    // subject always have something to find the submission by.
+    let orderRef = String(body.orderRef || '').trim();
+    if (!orderRef) orderRef = phone;
     const pickupDay = String(body.pickupDay || '').trim();
     const preSignature = String(body.preSignature || '').trim();
 
@@ -230,9 +235,12 @@ exports.handler = async (event) => {
         ServerSideEncryption: 'AES256', // encrypted at rest; never a public URL
       }));
 
-    await put(`id-front.${front.ext}`, front.buf, front.type);
-    if (back) await put(`id-back.${back.ext}`, back.buf, back.type);
-    await put('record.json', Buffer.from(JSON.stringify(record, null, 2), 'utf8'), 'application/json');
+    // Uploads run in parallel (photos + record are independent), so the
+    // function answers faster than doing them one after another.
+    const uploads = [put(`id-front.${front.ext}`, front.buf, front.type)];
+    if (back) uploads.push(put(`id-back.${back.ext}`, back.buf, back.type));
+    uploads.push(put('record.json', Buffer.from(JSON.stringify(record, null, 2), 'utf8'), 'application/json'));
+    await Promise.all(uploads);
 
     // Private staff alert in the function log only — name + order ref, NO ID image.
     console.log(`New pickup intake for ${fullName}, order ref: ${orderRef || '(none)'}, pickup day: ${pickupDay || '(none)'}, id: ${id}`);
