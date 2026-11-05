@@ -21,13 +21,20 @@
 // Env vars (Netlify, read only — never hardcode values here):
 //   WASABI_BUCKET, WASABI_REGION, WASABI_KEY, WASABI_SECRET
 //   (WASABI_ENDPOINT optional override, else s3.<region>.wasabisys.com)
+//   INTAKE_SMTP_PASS — password for storage@xlarms.us (set as a secret in
+//   Netlify by Jonathan). Sender and recipient are fixed in code below:
+//   from storage@xlarms.us, to info@xlarms.us. No new env vars needed for them.
 // No new dependency: @aws-sdk/client-s3 is already in package.json.
+// nodemailer is added in package.json for the staff alert email.
 
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const PREFIX = 'intake-private';
 const PHONE = '(678) 691-6375';
+const ALERT_FROM = 'storage@xlarms.us';
+const ALERT_TO = 'info@xlarms.us';
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // 8 MB per photo
 const ALLOWED_TYPES = {
   'image/jpeg': 'jpg',
@@ -163,8 +170,31 @@ exports.handler = async (event) => {
 
     // Private staff alert in the function log only — name + order ref, NO ID image.
     console.log(`New pickup intake for ${fullName}, order ref: ${orderRef || '(none)'}, pickup day: ${pickupDay || '(none)'}, id: ${id}`);
-    // No email is sent from here: no email provider is connected to the site
-    // yet. Staff check the intake list (intake-view.js, action=list).
+    // Email alert to staff (best-effort: a failed email must NEVER fail the
+    // submission — the intake is already safely stored above). Sends from
+    // storage@xlarms.us via HostGator SMTP to info@xlarms.us. The email
+    // carries name / product / order ref / pickup day only — NO ID photo,
+    // NO pre-signature. Staff open the photo in intake-view.
+    if (process.env.INTAKE_SMTP_PASS) {
+      try {
+        const mailer = nodemailer.createTransport({
+          host: 'mail.xlarms.us',
+          port: 465,
+          secure: true,
+          auth: { user: ALERT_FROM, pass: process.env.INTAKE_SMTP_PASS },
+        });
+        await mailer.sendMail({
+          from: ALERT_FROM,
+          to: ALERT_TO,
+          subject: `New pickup intake: ${fullName} — ${orderRef || 'no order ref'}`,
+          text: `New pickup intake received.\n\nName: ${fullName}\nProduct: ${product}\nOrder ref: ${orderRef || '(none)'}\nPickup day: ${pickupDay || '(none)'}\nPhone: ${phone}\nEmail: ${email}\nSubmission id: ${id}\n\nOpen it in the staff intake list (intake-view). Do not reply to this email with ID photos.`,
+        });
+      } catch (e) {
+        console.error('intake-submit: alert email failed (submission already stored):', e && e.message);
+      }
+    } else {
+      console.log('intake-submit: INTAKE_SMTP_PASS not set — no alert email sent.');
+    }
 
     return json(200, {
       ok: true,
