@@ -99,45 +99,15 @@ function score(p, toks, raw) {
   return matched * 10 + (p.stock_qty > 0 ? 5 : 0);
 }
 
-// PRE-INDEX (2026-11-04, pre-launch speed): list/search pages no longer
-// reload the full ~6 MB Blobs catalog + image manifest on every request.
-// Instead they read catalog-index.json bundled alongside this function —
-// slim card fields only, images already joined, generated from the live
-// API on 2026-11-04 (30,387 products, API pagination order preserved).
-// Single-SKU lookups (product page) deliberately SKIP the index and use
-// Blobs, so description / features / hi-res / Prop 65 stay full.
-// If the index file is missing or empty, list pages fall back to the
-// exact old Blobs path — a bad index can slow the shop, never break it.
-async function loadIndex() {
-  // Index is split into 4 parts (2026-11-04): GitHub's web upload choked
-  // on the single 13.6 MB file, while 3.4 MB parts upload reliably.
-  // Parts must load in order (1..4) — pagination order is preserved
-  // across the split, so browse order matches the live API.
-  try {
-    const all = [];
-    for (let i = 1; i <= 4; i++) {
-      const raw = fs.readFileSync(path.join(__dirname, `catalog-index-${i}.json`), 'utf8');
-      const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.products) || data.products.length === 0) return null;
-      all.push(...data.products);
-    }
-    if (all.length > 0) return all;
-  } catch (e) { /* no usable index — fall through to Blobs */ }
-  return null;
-}
-async function loadCatalog(event, useIndex) {
-  if (useIndex) {
-    const indexed = await loadIndex();
-    if (indexed) return { products: indexed, fromIndex: true };
-  }
+async function loadCatalog(event) {
   try {
     const { getStore, connectLambda } = require('@netlify/blobs');
     try { connectLambda(event); } catch (e) { /* non-Lambda context */ }
     const live = await getStore('xl-arms-catalog').get('products.json', { type: 'json' });
-    if (live && Array.isArray(live.products) && live.products.length > 0) return { products: live.products, fromIndex: false };
+    if (live && Array.isArray(live.products) && live.products.length > 0) return live.products;
   } catch (e) { console.warn('Blobs catalog not available, falling back to sample file:', e.message); }
-  const file = path.join(__dirname, '..', '..', '..', 'data', 'products.json');
-  return { products: JSON.parse(fs.readFileSync(file, 'utf8')).products || [], fromIndex: false };
+  const file = path.join(__dirname, '..', '..', 'data', 'products.json');
+  return JSON.parse(fs.readFileSync(file, 'utf8')).products || [];
 }
 
 // Image manifest (written by image-sync-background.js): { images: { SKU: { count, hiCount } } }.
@@ -152,44 +122,14 @@ async function loadImageManifest(event) {
   return null;
 }
 
-// PRODUCT-PAGE PRE-INDEX (2026-11-04, part 2): a SKU lookup first tries
-// the per-letter full-index chunk in Blobs (built by
-// full-index-build-background.js from the live catalog). One chunk is
-// ~1/26th of the catalog, so it loads in a fraction of the full-catalog
-// time, with the full record (description, features, hi-res, Prop 65).
-// If the chunk is missing, this returns null and the caller falls back
-// to the full catalog load — slow, never broken.
-async function loadSkuChunk(event, sku) {
-  try {
-    const { getStore, connectLambda } = require('@netlify/blobs');
-    try { connectLambda(event); } catch (e) { /* non-Lambda context */ }
-    const first = String(sku || '')[0] ? String(sku)[0].toUpperCase() : '0';
-    const key = /^[A-Z]$/.test(first) ? first : '0';
-    const chunk = await getStore('xl-arms-catalog').get(`full-index-${key}.json`, { type: 'json' });
-    if (chunk && Array.isArray(chunk.products) && chunk.products.length > 0) return chunk.products;
-  } catch (e) { /* fall through to full catalog */ }
-  return null;
-}
 exports.handler = async (event) => {
   try {
     const q = event.queryStringParameters || {};
-    if (q.sku) {
-      const chunk = await loadSkuChunk(event, q.sku);
-      if (chunk) {
-        const found = chunk.map(cleanProduct).find((p) => String(p.sku).toLowerCase() === String(q.sku).toLowerCase());
-        if (found) return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: [found], total: 1, page: 1, pageSize: 1 }) };
-      }
-      // Chunk missing or SKU not in it — fall through to full catalog below.
-    }
-    const useIndex = !q.sku; // product page needs the full record — see loadCatalog
-    const loaded = await loadCatalog(event, useIndex);
-    const all = loaded.products.map(cleanProduct);
+    const all = (await loadCatalog(event)).map(cleanProduct);
     // Image manifest join (added 2026-10-26): SKUs the image sync has
     // uploaded get real Bunny URLs; everything else keeps the placeholder.
     // Never another product's photo, never a guessed URL.
-    // Skipped for index loads — the index already carries joined images,
-    // and skipping the second Blobs call is part of the speed win.
-    const bunnyHost = loaded.fromIndex ? '' : (process.env.BUNNY_HOSTNAME || '');
+    const bunnyHost = process.env.BUNNY_HOSTNAME || '';
     if (bunnyHost) {
       const manifest = await loadImageManifest(event);
       if (manifest) {
