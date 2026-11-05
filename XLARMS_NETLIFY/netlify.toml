@@ -27,3 +27,10 @@
 # netlify/functions/gapfill-scheduler.js. Pause with GAPFILL_AUTO_PAUSED=1.
 [functions."gapfill-scheduler"]
   schedule = "*/30 * * * *"
+
+# Pickup-intake retention cleanup (Jonathan, 2026-11-05): deletes a
+# submission's ID photo + record 30 days after pickup, or 30 days after
+# submission if never picked up. See netlify/functions/intake-cleanup.js.
+# Only ever deletes objects under the private intake-private/ prefix.
+[functions."intake-cleanup"]
+  schedule = "0 9 * * *"
