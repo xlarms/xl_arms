@@ -58,16 +58,42 @@ function updateCartBadge() {
 // same as the Blobs chunk it was exported from. Any failure (file not
 // deployed yet, 404, bad JSON) returns null and the caller falls back
 // to /api/products — never throws, never breaks the page.
+/* Static product chunks (2026-11-06): product pages read the per-letter
+   chunk file straight from the CDN instead of the slow Blobs-backed API.
+   S, M and B were split into smaller sorted-SKU range parts (S-1..3,
+   M-1..3, B-1..2) because the whole-letter files were 4.5–7.2 MB;
+   data/full-index-manifest.json maps each part to its first/last SKU.
+   The manifest is fetched once per page load and cached; if it (or a
+   part file) fails, this returns null and the caller falls back to
+   /api/products?sku= — the page never breaks. */
+let __staticManifest = null;
+let __staticManifestTried = false;
 async function fetchStaticProduct(sku) {
   try {
     if (!sku) return null;
-    const first = String(sku)[0].toUpperCase();
+    const up = String(sku).toUpperCase();
+    const first = up[0];
     const letter = /^[A-Z]$/.test(first) ? first : '0';
-    const res = await fetch('data/full-index-' + letter + '.json');
+    let file = 'data/full-index-' + letter + '.json';
+    if (letter === 'S' || letter === 'M' || letter === 'B') {
+      if (!__staticManifestTried) {
+        __staticManifestTried = true;
+        try {
+          const mr = await fetch('data/full-index-manifest.json');
+          if (mr.ok) __staticManifest = await mr.json();
+        } catch (e) { /* manifest failed — fall through to API fallback */ }
+      }
+      const parts = (__staticManifest && __staticManifest[letter]) || null;
+      if (!parts) return null;
+      const part = parts.find((pt) => up >= pt.first && up <= pt.last);
+      if (!part) return null;
+      file = part.file;
+    }
+    const res = await fetch(file);
     if (!res.ok) return null;
     const d = await res.json();
     const list = (d && d.products) || [];
-    return list.find((x) => String(x.sku).toLowerCase() === String(sku).toLowerCase()) || null;
+    return list.find((x) => String(x.sku).toUpperCase() === up) || null;
   } catch (e) { return null; }
 }
 async function addToCart(sku) {
