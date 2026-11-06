@@ -1,0 +1,825 @@
+// XL Arms shop — SERVER-DRIVEN search (paginated).
+// Why server-driven: the live catalog is 26,298 products / ~6.29 MB.
+// Netlify Functions crash over ~6 MB per response, so the shop must NEVER
+// fetch the whole catalog. /api/products (get-products.js) filters/scores
+// server-side and returns only one page (48) + total + facets.
+// Rules: exact SKU/UPC first, then brand+model, then all-terms narrowing.
+// Caliber canonicalised: 9 mm / 9x19 -> 9mm, .223 / 223 Rem -> 223, 5.56 -> 5.56, 12 gauge -> 12ga.
+// Synonyms expand the QUERY, never silently substitute across calibers.
+const SYNONYMS = { g19: ['glock', '19'], g17: ['glock', '17'], '9x19': ['9mm'], 9: ['9mm'] };
+function canonicalCaliber(q) {
+  return q.replace(/\b9\s*mm\b/g, '9mm').replace(/\b9\s*x\s*19\b/g, '9mm')
+    .replace(/\.223\s*rem(?:ington)?\b/g, '223').replace(/\b223\s*rem(?:ington)?\b/g, '223')
+    .replace(/\b12\s*ga(?:uge)?\b/g, '12ga').replace(/\b5\.56\s*nato\b/g, '5.56');
+}
+function tokens(q) {
+  const parts = canonicalCaliber(String(q || '').toLowerCase().replace(/[^a-z0-9.\s]/g, ' ')).split(/\s+/).filter(Boolean);
+  const out = [];
+  for (const p of parts) { if (SYNONYMS[p]) out.push(...SYNONYMS[p]); else out.push(p); }
+  return [...new Set(out)];
+}
+function score(p, toks, raw) {
+  if (raw && (String(p.sku).toLowerCase() === raw || String(p.upc) === raw)) return 1000;
+  // Word-boundary matching on brand/model/title/category/caliber only —
+  // a token must be a whole word, not a substring of a UPC (e.g. "19"
+  // inside 813119... used to outrank real Glock 19 items).
+  const words = new Set([p.brand, p.model, p.title, p.category, p.caliber, p.caliber_canonical].join(' ').toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean));
+  const has = (t) => words.has(String(t).replace(/\./g, ''));
+  const normToks = toks.map((t) => String(t).replace(/\./g, ''));
+  if (toks.length && toks.every(has)) {
+    let s = 500;
+    const bmWords = (p.brand + ' ' + p.model).toLowerCase().replace(/\./g, '').split(/[^a-z0-9]+/).filter(Boolean);
+    if (bmWords.length && bmWords.every((w) => normToks.includes(w))) s += 100;
+    const modelFirst = (p.model || '').split(/\s+/)[0].toLowerCase();
+    if (modelFirst && normToks.includes(modelFirst)) s += 80;
+    if (p.stock_qty > 0) s += 50;
+    return s;
+  }
+  if (!toks.length) return p.stock_qty > 0 ? 50 : 0;
+  const matched = toks.filter(has).length;
+  return matched === 0 ? 0 : matched * 10 + (p.stock_qty > 0 ? 5 : 0);
+}
+function money(n) { return '$' + Number(n).toFixed(2); }
+function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+/* Cart: front-end only, stored in the browser (localStorage). No order is
+   placed and no payment is taken here — checkout is still to be wired once
+   a firearms-friendly gateway is approved in writing. */
+function getCart() { try { return JSON.parse(localStorage.getItem('xl_cart') || '[]'); } catch (e) { return []; } }
+function saveCart(c) { try { localStorage.setItem('xl_cart', JSON.stringify(c)); } catch (e) {} updateCartBadge(); }
+function updateCartBadge() {
+  const n = getCart().reduce((a, i) => a + (i.qty || 1), 0);
+  document.querySelectorAll('#cartCount').forEach((el) => { el.textContent = n; });
+}
+// STATIC-FIRST PRODUCT LOOKUP (2026-11-06): product data is shipped as
+// plain per-letter JSON files (data/full-index-<letter>.json) with the
+// site, so the CDN serves a SKU's chunk in milliseconds instead of the
+// ~2.6s Netlify Blobs read the /api/products SKU path needs. The chunk
+// holds the FULL product record (description, features, hires, Prop 65),
+// same as the Blobs chunk it was exported from. Any failure (file not
+// deployed yet, 404, bad JSON) returns null and the caller falls back
+// to /api/products — never throws, never breaks the page.
+/* Static product chunks (2026-11-06): product pages read the per-letter
+   chunk file straight from the CDN instead of the slow Blobs-backed API.
+   S, M and B were split into smaller sorted-SKU range parts (S-1..3,
+   M-1..3, B-1..2) because the whole-letter files were 4.5–7.2 MB;
+   data/full-index-manifest.json maps each part to its first/last SKU.
+   The manifest is fetched once per page load and cached; if it (or a
+   part file) fails, this returns null and the caller falls back to
+   /api/products?sku= — the page never breaks. */
+let __staticManifest = null;
+let __staticManifestTried = false;
+async function fetchStaticProduct(sku) {
+  try {
+    if (!sku) return null;
+    const up = String(sku).toUpperCase();
+    const first = up[0];
+    const letter = /^[A-Z]$/.test(first) ? first : '0';
+    let file = 'data/full-index-' + letter + '.json';
+    if (letter === 'S' || letter === 'M' || letter === 'B') {
+      if (!__staticManifestTried) {
+        __staticManifestTried = true;
+        try {
+          const mr = await fetch('data/full-index-manifest.json');
+          if (mr.ok) __staticManifest = await mr.json();
+        } catch (e) { /* manifest failed — fall through to API fallback */ }
+      }
+      const parts = (__staticManifest && __staticManifest[letter]) || null;
+      if (!parts) return null;
+      const part = parts.find((pt) => up >= pt.first && up <= pt.last);
+      if (!part) return null;
+      file = part.file;
+    }
+    const res = await fetch(file);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const list = (d && d.products) || [];
+    return list.find((x) => String(x.sku).toUpperCase() === up) || null;
+  } catch (e) { return null; }
+}
+async function addToCart(sku) {
+  let p = await fetchStaticProduct(sku);
+  if (!p) {
+    try {
+      const res = await fetch('/api/products?sku=' + encodeURIComponent(sku));
+      if (res.ok) { const d = await res.json(); p = (d.products || [])[0] || null; }
+    } catch (e) {}
+  }
+  if (!p) {
+    try { const r = await fetch('data/products.json'); const d = await r.json(); p = (d.products || []).find((x) => x.sku === sku) || null; } catch (e) {}
+  }
+  if (!p) return;
+  // Call-only for unpriced items (Jonathan, 2026-10-26): a $0 feed price must
+  // never reach the cart — the buttons are swapped too, this is the backstop.
+  if (!(p.price > 0)) { alert('This item is priced on request — please call (678) 691-6375 for a price.'); return; }
+  // Out-of-stock items are never added to the cart either (Jonathan,
+  // 2026-10-26): shoppers use Notify Me When In Stock instead.
+  if (!(p.stock_qty > 0)) { alert('This item is out of stock — use Notify Me When In Stock and we will email you when it returns.'); return; }
+  const cart = getCart();
+  const line = cart.find((i) => i.sku === p.sku);
+  if (line) line.qty += 1; else cart.push({ sku: p.sku, title: p.title, price: p.price, image: (p.images || [])[0] || 'images/placeholder.svg', is_firearm: !!p.is_firearm, qty: 1 });
+  saveCart(cart);
+  updateCartBadge();
+  alert('Added to cart: ' + p.title);
+}
+// Back-in-stock request (Jonathan, 2026-10-26): out-of-stock items show a
+// Notify Me form instead of Add to Cart. Primary capture is Netlify Forms:
+// the shopper's email + SKU are POSTed to the "back-in-stock" form (defined
+// as a hidden static form in every page that renders notify forms, because
+// Netlify only registers forms it finds in static HTML at deploy time).
+// Submissions land in Netlify Dashboard -> Forms, no mail app needed. If that
+// POST fails (e.g. previewing the site locally, or Forms not yet active),
+// fall back to the mailto path so the signup is never silently lost.
+async function notifyStock(e, sku) {
+  if (e) e.preventDefault();
+  const form = e && e.target ? e.target : null;
+  const input = form ? form.querySelector('input[type=email]') : null;
+  const email = input ? input.value.trim() : '';
+  let title = '';
+  try {
+    const card = form ? form.closest('article') : null;
+    const h3 = card ? card.querySelector('h3') : null;
+    const h2 = document.querySelector('#product h2');
+    title = (h3 ? h3.innerText : '') || (h2 ? h2.innerText : '') || '';
+  } catch (err) {}
+  try {
+    const body = new URLSearchParams({ 'form-name': 'back-in-stock', email, sku, title });
+    const res = await fetch(window.location.pathname, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+    if (!res.ok) throw new Error('Form submission failed: ' + res.status);
+    if (form) form.outerHTML = '<p class="notifyok">You are on the list — we will email you when this item is back in stock.</p>';
+    return false;
+  } catch (err) {
+    const subject = encodeURIComponent('Back-in-stock request: ' + sku);
+    const mailBody = encodeURIComponent('Please notify me when this item is back in stock.\n\nItem: ' + (title || sku) + ' (' + sku + ')\nMy email: ' + email);
+    window.location.href = 'mailto:info@xlarms.us?subject=' + subject + '&body=' + mailBody;
+    return false;
+  }
+}
+function clearCart() { saveCart([]); initCartPage(); }
+function cartQty(sku, d) {
+  const cart = getCart(); const line = cart.find((i) => i.sku === sku);
+  if (!line) return; line.qty += d; if (line.qty <= 0) cart.splice(cart.indexOf(line), 1);
+  saveCart(cart); initCartPage();
+}
+function cartRemove(sku) { saveCart(getCart().filter((i) => i.sku !== sku)); initCartPage(); }
+function initCartPage() {
+  const el = document.getElementById('cartItems'); if (!el) return;
+  const cart = getCart();
+  const totalEl = document.getElementById('cartTotal');
+  if (!cart.length) { el.innerHTML = '<p>Your cart is empty.</p><p><a class="btn" href="shop.html">Shop all products →</a></p>'; if (totalEl) totalEl.textContent = ''; return; }
+  let total = 0;
+  el.innerHTML = cart.map((i) => { total += i.price * i.qty; return `<div class="cartitem"><img src="${esc(i.image)}" alt=""><div><strong>${esc(i.title)}</strong><div class="meta">${esc(i.sku)}${i.is_firearm ? ' · Ships to your FFL' : ''}</div><div>${money(i.price)} × <button onclick="cartQty('${esc(i.sku)}',-1)">−</button> ${i.qty} <button onclick="cartQty('${esc(i.sku)}',1)">+</button> <button onclick="cartRemove('${esc(i.sku)}')">Remove</button></div></div><div class="price">${money(i.price * i.qty)}</div></div>`; }).join('');
+  if (totalEl) totalEl.textContent = 'Subtotal: ' + money(total);
+}
+/* Featured products (homepage): one per anchor, each anchor fetched from
+   its own real API pool (2026-11-01 rebuild). The old version only looked
+   at the first 4 in-stock pages, SKU-ascending — 1791/A items only — so
+   no pistol, shotgun, AR-15 or ammunition could ever be picked, and the
+   1791 guard (brand !== '1791') never matched the real brand
+   '1791 Gunleather'. Real categories, verified live 2026-11-01:
+   Handguns; Optics + 'red dot'; Soft Gun Cases, Packs, Bags / Packs & Bags;
+   Long Guns + Defensive/Sporting Shotguns; Long Guns + Modern Sporting
+   Rifles; Ammunition. */
+async function initFeatured() {
+  const el = document.getElementById('featuredResults'); if (!el) return;
+  const period = Math.floor(Date.now() / 86400000 / 2);
+  const is1791 = (p) => String(p.brand || '').startsWith('1791');
+  const hasPhoto = (p) => p.images && p.images[0] && !String(p.images[0]).includes('placeholder');
+  const clean = (list) => {
+    const seen = new Set(); const out = [];
+    for (const p of list || []) { if (p && p.sku && !seen.has(p.sku)) { seen.add(p.sku); out.push(p); } }
+    return out;
+  };
+  // Prefer in-stock, priced, real-photo items; fall back to the raw pool
+  // only if that leaves an anchor empty (so an anchor never vanishes).
+  const prefer = (list) => {
+    const base = clean(list).filter((p) => p.stock_qty > 0 && !is1791(p));
+    const good = base.filter((p) => p.price > 0 && hasPhoto(p));
+    return good.length ? good : base;
+  };
+  const fetchPool = async (url) => {
+    try { const res = await fetch(url); if (!res.ok) return []; const d = await res.json(); return d.products || []; } catch (e) { return []; }
+  };
+  const enc = encodeURIComponent;
+  const anchorUrls = [
+    [`/api/products?inStock=1&limit=100&category=${enc('Handguns')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Optics')}&q=${enc('red dot')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Soft Gun Cases, Packs, Bags')}&subCategory=${enc('Packs & Bags')}`,
+     `/api/products?inStock=1&limit=100&category=${enc('Soft Gun Cases, Packs, Bags')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Defensive Shotguns')}`,
+     `/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Sporting Shotguns')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Long Guns')}&subCategory=${enc('Modern Sporting Rifles')}`],
+    [`/api/products?inStock=1&limit=100&category=${enc('Ammunition')}`],
+  ];
+  // 2026-11-03 speed: homepage NO LONGER calls the API 6 times. Each API
+  // call reloads the full ~30k catalog, so featured alone cost ~6 catalog
+  // loads. Instead read data/featured-pools.json — one small static file
+  // (slim card fields, in-stock at generation time, 2026-11-03) served by
+  // the CDN. Period rotation, anchor picks, second pistol/shotgun and
+  // dedup logic are unchanged, and addToCart still re-checks the live SKU
+  // before adding, so a stale featured pick can never sell out-of-stock.
+  // If the static file is missing, fall back to the live API pools.
+  let pools = null;
+  try {
+    const r = await fetch('data/featured-pools.json');
+    if (r.ok) { const d = await r.json(); if (Array.isArray(d.pools) && d.pools.length === 6) pools = d.pools.map((pool) => prefer(pool)); }
+  } catch (e) {}
+  if (!pools) {
+    // 2026-11-02 speedup: fetch the 6 anchor pools IN PARALLEL instead of
+    // one after another. Fallback URLs within one anchor still run in
+    // order (only if the first returns empty). Promise.all preserves
+    // anchor order, so picks are unchanged.
+    pools = await Promise.all(anchorUrls.map(async (urls) => {
+      let pool = [];
+      for (const url of urls) { const got = await fetchPool(url); pool = pool.concat(got); if (pool.length) break; }
+      return prefer(pool);
+    }));
+  }
+  let picked = [];
+  // SKU-based dedup (2026-11-03): the old picked.includes() compared object
+  // identity, which misses the same SKU returned by two different API calls.
+  // Also, a "second" pick must not be the same brand+model as the anchor
+  // pick — live 2026-11-03 the shotgun anchor (JTS M12AR MLOK) and the
+  // second shotgun (JTS M12AR, same model, polymer forend) looked like a
+  // duplicate card to customers.
+  const hasSku = (p) => picked.some((q) => q.sku === p.sku);
+  const anchor = {};
+  for (let ai = 0; ai < pools.length; ai++) {
+    const pool = pools[ai];
+    if (!pool.length) continue;
+    const choice = pool[period % pool.length];
+    if (choice && !hasSku(choice)) { picked.push(choice); anchor[ai] = choice; }
+  }
+  // Spots 7 and 8 (2026-11-01, Jonathan): a second pistol and a second
+  // shotgun — NOT the generic fill, which was landing on two soft gun
+  // cases. Take the next distinct item from each pool, wrapping around,
+  // skipping the anchor's brand+model as well as its SKU.
+  const nextDistinct = (pool, anchorPick) => {
+    if (!pool || !pool.length) return null;
+    for (let i = 1; i <= pool.length; i++) {
+      const cand = pool[(period + i) % pool.length];
+      if (!cand || hasSku(cand)) continue;
+      if (anchorPick && cand.brand === anchorPick.brand && cand.model && cand.model === anchorPick.model) continue;
+      return cand;
+    }
+    return null;
+  };
+  const secondPistol = nextDistinct(pools[0], anchor[0]);
+  if (secondPistol) picked.push(secondPistol);
+  const secondShotgun = nextDistinct(pools[3], anchor[3]);
+  if (secondShotgun) picked.push(secondShotgun);
+  // Any remaining spots (only if an anchor pool was empty) fill from the
+  // anchor pools' remaining items, rotated by period, category-spread
+  // first, never a 1791 item.
+  const rest = clean(pools.flat()).filter((p) => !hasSku(p) && !is1791(p) && p.stock_qty > 0);
+  const ordered = rest.length ? rest.slice((period * 37) % rest.length).concat(rest.slice(0, (period * 37) % rest.length)) : [];
+  for (const p of ordered) { if (picked.length >= 8) break; if (!picked.some((q) => q.category === p.category)) picked.push(p); }
+  for (const p of ordered) { if (picked.length >= 8) break; if (!hasSku(p)) picked.push(p); }
+  if (!picked.length) {
+    try { const r = await fetch('data/products.json'); const d = await r.json(); picked = prefer((d.products || []).filter((p) => p.stock_qty > 0)).slice(0, 8); } catch (e) {}
+  }
+  el.innerHTML = picked.map(card).join('') || '<p>Featured products could not be loaded right now.</p>';
+}
+// Customer-facing category: RSR calls all rifles + shotguns 'Long Guns',
+// which is why shotgun cards said 'Long Guns'. Translate by subCategory
+// (2026-11-01). Lower Receivers stay 'Long Guns' — they are not a rifle.
+function displayCategory(p) {
+  if (!p || p.category !== 'Long Guns') return p ? p.category : '';
+  if (['Defensive Shotguns', 'Sporting Shotguns'].includes(p.subCategory)) return 'Shotguns';
+  if (['AK Style Rifles', 'Bullpups', 'Hunting Rifles', 'Modern Sporting Rifles', 'Surplus/Replica Rifles'].includes(p.subCategory)) return 'Rifles';
+  return 'Long Guns';
+}
+function card(p) {
+  const stock = p.stock_qty > 0 ? `<span class="instock">In stock</span>` : `<span class="outstock">Out of stock</span>`;
+  const ffl = p.is_firearm ? `<div class="meta">Ships to your FFL — not to your home.</div>` : '';
+  const sku = String(p.sku).replace(/'/g, "\\'");
+  return `<article class="card">
+    <a href="product.html?sku=${encodeURIComponent(p.sku)}"><img src="${p.images[0]}" alt="${p.title}" loading="lazy"></a>
+    <h3><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title}</a></h3>
+    <div class="meta">${p.brand} · ${displayCategory(p)}${p.caliber ? ' · ' + p.caliber : ''}</div>
+    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div>
+    <div>${stock}</div>${ffl}
+    ${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn btn-cart" onclick="addToCart('${sku}')">Add to Cart</button>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${sku}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn btn-cart" href="tel:+16786916375">Call for Price</a>`}
+  </article>`;
+}
+// ---- Detailed-filter sidebar (shop + category pages, added 2026-10-26) ----
+// One value per facet group; checkboxes behave like radios (click a checked
+// box to clear it). Groups with no facet values are skipped — this is what
+// keeps new-attribute groups hidden until the re-import that publishes them.
+// The sidebar only rebuilds when the facet lists actually change, so typing
+// in a price box never loses focus to a rebuild.
+const SIDEBAR_GROUPS = [
+  { key: 'brand', label: 'Manufacturer', facet: 'brands' },
+  { key: 'caliber', label: 'Caliber', facet: 'calibers' },
+  { key: 'capacity', label: 'Capacity', facet: 'capacities' },
+  { key: 'barrel', label: 'Barrel Length', facet: 'barrels', suffix: '"' },
+  { key: 'action', label: 'Action', facet: 'actions' },
+  { key: 'type', label: 'Type', facet: 'types' },
+  { key: 'finish', label: 'Finish', facet: 'finishes' },
+  { key: 'frame', label: 'Frame', facet: 'frames' },
+  { key: 'grips', label: 'Grips', facet: 'grips' },
+  { key: 'color', label: 'Color', facet: 'colors' },
+  { key: 'material', label: 'Material', facet: 'materials' },
+  { key: 'size', label: 'Size', facet: 'sizes' },
+  { key: 'subCategory', label: 'Subcategory', facet: 'subCategories' },
+];
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function baseSidebarState() {
+  return { capacity: '', barrel: '', action: '', type: '', finish: '', frame: '', grips: '', color: '', material: '', size: '', subCategory: '', priceMin: '', priceMax: '', isNew: false, closeout: false, perPage: '48' };
+}
+function sidebarParams(state) {
+  const p = {};
+  for (const k of ['brand', 'caliber', 'capacity', 'barrel', 'action', 'type', 'finish', 'frame', 'grips', 'color', 'material', 'size', 'subCategory', 'priceMin', 'priceMax']) if (state[k]) p[k] = state[k];
+  if (state.isNew) p.isNew = '1';
+  if (state.closeout) p.closeout = '1';
+  if (state.inStock) p.inStock = '1';
+  if (state.sort && state.sort !== 'relevance') p.sort = state.sort;
+  return p;
+}
+function renderSidebar(el, facets, state, opts, onChange, onClear) {
+  if (!el || !facets) return;
+  const key = JSON.stringify(facets);
+  if (!opts.force && el._facetsKey === key && el.innerHTML) return;
+  el._facetsKey = key;
+  const groups = SIDEBAR_GROUPS.filter((g) => opts.includeBasics || (g.key !== 'brand' && g.key !== 'caliber'));
+  let html = opts.heading === false ? '' : '<h3>Filter</h3>';
+  for (const g of groups) {
+    const values = facets[g.facet] || [];
+    if (!values.length) continue;
+    html += `<details open><summary>${g.label}</summary><div class="facet-list">`;
+    for (const v of values) {
+      const val = String(v);
+      const checked = String(state[g.key] || '') === val ? ' checked' : '';
+      html += `<label><input type="checkbox" data-facet="${g.key}" value="${escHtml(val)}"${checked}> ${escHtml(val)}${g.suffix || ''}</label>`;
+    }
+    html += '</div></details>';
+  }
+  html += '<details open><summary>Price</summary><div class="price-row">'
+    + `<input type="number" min="0" data-price="min" placeholder="Min $" value="${escHtml(state.priceMin || '')}">`
+    + `<input type="number" min="0" data-price="max" placeholder="Max $" value="${escHtml(state.priceMax || '')}">`
+    + '</div></details>';
+  html += '<details open><summary>Availability</summary><div class="facet-list">';
+  if (opts.includeBasics) html += `<label><input type="checkbox" data-bool="inStock"${state.inStock ? ' checked' : ''}> In stock only</label>`;
+  html += `<label><input type="checkbox" data-bool="isNew"${state.isNew ? ' checked' : ''}> New arrivals (last 90 days)</label>`;
+  html += `<label><input type="checkbox" data-bool="closeout"${state.closeout ? ' checked' : ''}> Closeout</label>`;
+  html += '</div></details>';
+  if (opts.includeBasics) {
+    html += '<label>Sort<select data-sort><option value="relevance">Relevance / In stock first</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option><option value="newest">Newest arrivals</option></select></label>';
+  }
+  html += '<label>Per page<select data-perpage><option value="24">24 per page</option><option value="48">48 per page</option><option value="96">96 per page</option></select></label>';
+  html += '<button class="btn" data-clear style="margin-top:10px">Clear all filters</button>';
+  el.innerHTML = html;
+  // Mobile filter toggle: renderSidebar rewrites a category aside, which
+  // would wipe the static toggle button — put it back at the top.
+  if (el.classList && el.classList.contains('filters') && !el.querySelector('.filter-toggle')) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'filter-toggle'; btn.setAttribute('aria-expanded', 'false');
+    btn.textContent = 'Show filters';
+    el.prepend(btn);
+  }
+  const sortSel = el.querySelector('[data-sort]');
+  if (sortSel) sortSel.value = state.sort || 'relevance';
+  const perSel = el.querySelector('[data-perpage]');
+  if (perSel) perSel.value = state.perPage || '48';
+  el.querySelectorAll('[data-facet]').forEach((cb) => cb.addEventListener('change', () => {
+    const k = cb.dataset.facet;
+    if (cb.checked) {
+      el.querySelectorAll(`[data-facet="${k}"]`).forEach((o) => { if (o !== cb) o.checked = false; });
+      state[k] = cb.value;
+    } else state[k] = '';
+    onChange();
+  }));
+  el.querySelectorAll('[data-bool]').forEach((cb) => cb.addEventListener('change', () => { state[cb.dataset.bool] = cb.checked; onChange(); }));
+  el.querySelectorAll('[data-price]').forEach((inp) => inp.addEventListener('change', () => {
+    state[inp.dataset.price === 'min' ? 'priceMin' : 'priceMax'] = inp.value.trim();
+    onChange();
+  }));
+  if (sortSel) sortSel.addEventListener('change', () => { state.sort = sortSel.value; onChange(); });
+  if (perSel) perSel.addEventListener('change', () => { state.perPage = perSel.value; onChange(); });
+  const clearBtn = el.querySelector('[data-clear]');
+  if (clearBtn) clearBtn.addEventListener('click', () => onClear());
+}
+async function initShop() {
+  const listEl = document.getElementById('results');
+  const countEl = document.getElementById('count');
+  const pageEl = document.getElementById('pagination');
+  const qEl = document.getElementById('q');
+  const catEl = document.getElementById('category');
+  const brandEl = document.getElementById('brand');
+  const calEl = document.getElementById('caliber');
+  const stockEl = document.getElementById('instock');
+  const sortEl = document.getElementById('sort');
+  if (!listEl) return;
+  let page = 1, totalPages = 1, facetsLoaded = false, fallbackProducts = null, renderSeq = 0, lastFacets = null, shopParam = '';
+  const side = baseSidebarState();
+  function clearShopFilters() {
+    qEl.value = ''; catEl.value = ''; brandEl.value = ''; calEl.value = ''; stockEl.checked = false; sortEl.value = 'relevance'; shopParam = '';
+    Object.assign(side, baseSidebarState());
+    const detailEl = document.getElementById('detailFilters');
+    if (detailEl && lastFacets) renderSidebar(detailEl, lastFacets, side, { includeBasics: false, heading: false, force: true }, resetAndRender, clearShopFilters);
+    page = 1; render();
+  }
+  function setOptions(el, values, label) {
+    const cur = el.value;
+    el.innerHTML = `<option value="">${label}</option>` + values.map((v) => `<option>${v}</option>`).join('');
+    if (values.includes(cur)) el.value = cur;
+  }
+  async function render() {
+    const paramObj = {
+      q: qEl.value || '', category: catEl.value || '', brand: brandEl.value || '',
+      caliber: calEl.value || '', inStock: stockEl.checked ? '1' : '',
+      sort: ['price-asc', 'price-desc', 'newest'].includes(sortEl.value) ? sortEl.value : '',
+      page: String(page), limit: side.perPage,
+    };
+    if (shopParam) paramObj.shop = shopParam;
+    Object.assign(paramObj, sidebarParams(side));
+    const params = new URLSearchParams(paramObj);
+    const mySeq = ++renderSeq;
+    let data = null;
+    try {
+      const res = await fetch('/api/products?' + params.toString());
+      if (res.ok) data = await res.json();
+    } catch (e) { /* fall through to sample fallback */ }
+    // Race guard: typing fires a render per keystroke and responses can
+    // finish out of order. Only the LATEST render may paint — a stale
+    // response (e.g. for "gl") must never overwrite the current term ("glock").
+    if (mySeq !== renderSeq) return;
+    if (data && typeof data.total === 'number') {
+      if (!facetsLoaded && data.facets) {
+        setOptions(catEl, data.facets.categories, 'All categories');
+        setOptions(brandEl, data.facets.brands, 'All brands');
+        setOptions(calEl, data.facets.calibers, 'All calibers');
+        facetsLoaded = true;
+      }
+      lastFacets = data.facets || lastFacets;
+      const detailEl = document.getElementById('detailFilters');
+      if (detailEl && data.facets) renderSidebar(detailEl, data.facets, side, { includeBasics: false, heading: false }, resetAndRender, clearShopFilters);
+      totalPages = Math.max(1, Math.ceil(data.total / (data.pageSize || 48)));
+      countEl.textContent = data.total + ' product' + (data.total === 1 ? '' : 's') + (data.total > (data.pageSize || 48) ? ` — page ${data.page} of ${totalPages}` : '');
+      listEl.innerHTML = data.products.length
+        ? data.products.map(card).join('')
+        : `<div class="banner"><strong>No products match.</strong> ${(qEl.value || '').trim() ? 'Try a brand + model (e.g. Glock 19), a SKU, or a caliber.' : 'Try removing a filter — brand, caliber, or “In stock only” — to widen the results.'}</div>`;
+      const sugg = document.getElementById('suggestions');
+      if (sugg) {
+        const raw = (qEl.value || '').trim();
+        sugg.innerHTML = raw && data.products.length
+          ? `<div class="filters" style="margin-top:8px"><strong>Suggestions</strong>${data.products.slice(0, 5).map((p) => `<div><a href="product.html?sku=${encodeURIComponent(p.sku)}">${p.title} — ${money(p.price)}</a></div>`).join('')}</div>` : '';
+      }
+      if (pageEl) {
+        pageEl.innerHTML = totalPages > 1
+          ? `<button id="prevPage" ${page <= 1 ? 'disabled' : ''}>← Previous</button> <span style="margin:0 8px">Page ${page} of ${totalPages}</span> <button id="nextPage" ${page >= totalPages ? 'disabled' : ''}>Next →</button>`
+          : '';
+        const prev = document.getElementById('prevPage');
+        const next = document.getElementById('nextPage');
+        if (prev) prev.onclick = () => { if (page > 1) { page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+        if (next) next.onclick = () => { if (page < totalPages) { page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+      }
+      return;
+    }
+    // Fallback: /api/products failed (e.g. old deploy) — use the static sample
+    // file, filtered locally, paginated the same way so it can never render 26k cards.
+    if (!fallbackProducts) {
+      try { const r = await fetch('data/products.json'); fallbackProducts = (await r.json()).products || []; }
+      catch (e) { fallbackProducts = []; }
+    }
+    const raw = (qEl.value || '').trim().toLowerCase();
+    const toks = raw ? tokens(raw) : [];
+    let items = fallbackProducts.filter((p) => {
+      const eq = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      if (catEl.value && !eq(p.category, catEl.value)) return false;
+      if (brandEl.value && !eq(p.brand, brandEl.value)) return false;
+      if (calEl.value && !eq(p.caliber, calEl.value)) return false;
+      if (stockEl.checked && p.stock_qty <= 0) return false;
+      return true;
+    });
+    if (raw) items = items.map((p) => ({ p, s: score(p, toks, raw) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
+    else if (sortEl.value === 'price-asc') items.sort((a, b) => a.price - b.price);
+    else if (sortEl.value === 'price-desc') items.sort((a, b) => b.price - a.price);
+    else items.sort((a, b) => (b.stock_qty > 0) - (a.stock_qty > 0));
+    if (mySeq !== renderSeq) return; // stale fallback must not overwrite a newer render
+    totalPages = Math.max(1, Math.ceil(items.length / 48));
+    countEl.textContent = items.length + ' product' + (items.length === 1 ? '' : 's');
+    listEl.innerHTML = items.slice((page - 1) * 48, page * 48).map(card).join('') || `<div class="banner"><strong>No exact match.</strong></div>`;
+    if (pageEl) pageEl.innerHTML = '';
+  }
+  function resetAndRender() { page = 1; render(); }
+  [qEl, catEl, brandEl, calEl, stockEl, sortEl].forEach((el) => el.addEventListener('input', resetAndRender));
+  const searchForm = document.getElementById('searchForm');
+  if (searchForm) searchForm.addEventListener('submit', (e) => { e.preventDefault(); resetAndRender(); });
+  // SEO / shareable URLs: index.html?category=Handguns or ?q=Glock%2019
+  // pre-fills the shop filters. Facets loaded in render() preserve these
+  // values when they exist in the facet lists.
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('q')) qEl.value = params.get('q');
+    if (params.get('shop')) shopParam = params.get('shop');
+    if (params.get('category')) catEl.value = params.get('category');
+    if (params.get('brand')) brandEl.value = params.get('brand');
+    if (params.get('caliber')) calEl.value = params.get('caliber');
+  } catch (e) { /* ignore malformed URLs */ }
+  render();
+}
+// Category landing pages (handguns.html, rifles.html, ...): a simple grid
+// fed by one API query — category=... or q=... — with pagination. The
+// landing copy itself is static HTML (indexable), only the grid is JS.
+async function initCategoryGrid() {
+  const holder = document.getElementById('categoryResults');
+  if (!holder) return;
+  const listEl = document.getElementById('results');
+  const countEl = document.getElementById('count');
+  const pageEl = document.getElementById('pagination');
+  const catQEl = document.getElementById('catQ');
+  const catForm = document.getElementById('catSearchForm');
+  let page = 1, totalPages = 1, renderSeq = 0, lastFacets = null;
+  const side = Object.assign(baseSidebarState(), { brand: '', caliber: '', inStock: false, sort: 'relevance' });
+  function clearCatFilters() {
+    if (catQEl) catQEl.value = '';
+    Object.assign(side, baseSidebarState(), { brand: '', caliber: '', inStock: false, sort: 'relevance' });
+    const catFiltersEl = document.getElementById('catFilters');
+    if (catFiltersEl && lastFacets) renderSidebar(catFiltersEl, lastFacets, side, { includeBasics: true, force: true }, () => { page = 1; render(); }, clearCatFilters);
+    page = 1; render();
+  }
+  async function render() {
+    const params = new URLSearchParams({ page: String(page), limit: side.perPage });
+    const mySeq = ++renderSeq;
+    const userQ = catQEl ? catQEl.value.trim() : '';
+    // Scoped search: on a category page, search stays INSIDE that category.
+    // Category-type pages: category=... + q=user term (API applies both).
+    // Shop-type pages (shotguns/rifles): shop=... + q=user term, so the
+    // page is the real Long Guns subCategory pool, not a q=shotgun search.
+    // Q-type pages (legacy): base term + user term combined.
+    if (holder.dataset.shopType === 'category') {
+      params.set('category', holder.dataset.shopValue);
+      if (userQ) params.set('q', userQ);
+    } else if (holder.dataset.shopType === 'shop') {
+      params.set('shop', holder.dataset.shopValue);
+      if (userQ) params.set('q', userQ);
+    } else {
+      params.set('q', userQ ? (holder.dataset.shopValue + ' ' + userQ) : holder.dataset.shopValue);
+    }
+    for (const [k, v] of Object.entries(sidebarParams(side))) params.set(k, v);
+    try {
+      const res = await fetch('/api/products?' + params.toString());
+      const data = await res.json();
+      // Race guard (same flaw as the shop grid): typing fires a render per
+      // keystroke and responses can finish out of order. Only the LATEST
+      // render may paint — a stale "gl" response must never overwrite "glock".
+      if (mySeq !== renderSeq) return;
+      lastFacets = data.facets || lastFacets;
+      const catFiltersEl = document.getElementById('catFilters');
+      if (catFiltersEl && data.facets) renderSidebar(catFiltersEl, data.facets, side, { includeBasics: true }, () => { page = 1; render(); }, clearCatFilters);
+      totalPages = Math.max(1, Math.ceil((data.total || 0) / parseInt(side.perPage, 10)));
+      countEl.textContent = (data.total || 0) + ' product' + (data.total === 1 ? '' : 's') + (data.total > parseInt(side.perPage, 10) ? ` — page ${page} of ${totalPages}` : '');
+      listEl.innerHTML = (data.products || []).map(card).join('') || '<p>No products found in this category right now.</p>';
+      if (pageEl) {
+        pageEl.innerHTML = totalPages > 1 ? `<button id="prevPage" ${page <= 1 ? 'disabled' : ''}>← Previous</button> <span style="margin:0 8px">Page ${page} of ${totalPages}</span> <button id="nextPage" ${page >= totalPages ? 'disabled' : ''}>Next →</button>` : '';
+        const prev = document.getElementById('prevPage');
+        const next = document.getElementById('nextPage');
+        if (prev) prev.onclick = () => { if (page > 1) { page--; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+        if (next) next.onclick = () => { if (page < totalPages) { page++; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+      }
+    } catch (e) { if (mySeq === renderSeq) listEl.innerHTML = '<p>Products could not be loaded right now.</p>'; }
+  }
+  if (catForm) catForm.addEventListener('submit', (e) => { e.preventDefault(); page = 1; render(); });
+  if (catQEl) catQEl.addEventListener('input', () => { page = 1; render(); });
+  render();
+}
+function initAgeGate() {
+  const gate = document.getElementById('ageGate');
+  if (!gate) return;
+  try {
+    const stored = localStorage.getItem('xl_age_verified');
+    if (stored && Date.now() - parseInt(stored, 10) < 30 * 24 * 60 * 60 * 1000) return; // verified in last 30 days
+  } catch (e) { /* private mode: show gate every visit */ }
+  gate.classList.remove('hidden');
+  document.getElementById('ageEnter').onclick = () => {
+    try { localStorage.setItem('xl_age_verified', String(Date.now())); } catch (e) {}
+    gate.classList.add('hidden');
+  };
+  document.getElementById('ageExit').onclick = () => {
+    const denied = document.getElementById('ageDenied');
+    if (denied) denied.style.display = 'block';
+  };
+}
+async function initProduct() {
+  const el = document.getElementById('product');
+  if (!el) return;
+  const sku = new URLSearchParams(location.search).get('sku');
+  let p = await fetchStaticProduct(sku);
+  if (!p) {
+    try {
+      const res = await fetch('/api/products?sku=' + encodeURIComponent(sku || ''));
+      if (res.ok) { const data = await res.json(); p = (data.products || [])[0] || null; }
+    } catch (e) { /* fallback below */ }
+  }
+  if (!p) {
+    const res = await fetch('data/products.json');
+    const data = await res.json();
+    p = (data.products || []).find((x) => x.sku === sku) || data.products[0];
+  }
+  if (!p) { el.innerHTML = '<p>Product not found.</p>'; return; }
+  // SEO: product page title + Product structured data, so Google can show
+  // price / availability for this SKU even though the page is JS-rendered.
+  try {
+    document.title = p.title + ' | XL Arms';
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: displayCategory(p), offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
+    document.head.appendChild(ld);
+  } catch (e) { /* SEO enhancement only */ }
+  const stock = p.stock_qty > 0 ? `<span class="instock">In stock</span>` : `<span class="outstock">Out of stock</span>`;
+  const ffl = p.is_firearm
+    ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
+    : `<div class="ffl"><strong>Ships normally.</strong> Ammunition and accessories do not require an FFL transfer, but state shipping restrictions still apply at checkout.</div>`;
+  el.innerHTML = `
+    <p><a href="index.html">← Back to shop</a></p>
+    <h2>${p.title}</h2>
+    <div class="pgallery">
+      <img id="pgMain" src="${(p.images || [])[0] || 'images/placeholder.svg'}" alt="${p.title}" class="pg-main${(p.images || []).length ? ' zoomable' : ''}" style="max-width:420px;width:100%;background:#f0ede6;border-radius:8px" ${(p.images || []).length ? `onclick="openPgLightbox(0)" title="Click to enlarge"` : ''}>
+      ${(p.images || []).length > 1 ? `<div class="pthumbs">${(p.images || []).map((src, i) => `<img src="${src}" alt="View ${i + 1} of ${p.title}" class="pthumb${i === 0 ? ' active' : ''}" onclick="setPgImage(${i})">`).join('')}</div>` : ''}
+    </div>
+    <div id="plightbox" class="plightbox" onclick="if (event.target === this) closePgLightbox()">
+      <button class="plb-btn plb-close" onclick="closePgLightbox()" aria-label="Close">×</button>
+      <img id="plbImg" src="" alt="">
+      ${(p.images || []).length > 1 ? `<div class="plb-bar"><button class="plb-btn plb-bar-btn" onclick="pgStep(-1)" aria-label="Previous image">‹ Previous</button><span id="plbCount" class="plb-count"></span><button class="plb-btn plb-bar-btn" onclick="pgStep(1)" aria-label="Next image">Next ›</button></div>` : ''}
+    </div>
+    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
+    <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
+    <p><button class="btn btn-dark" onclick="shareProduct()">Share this gun →</button> <span id="shareMsg" class="meta"></span></p>
+    <table class="specs">
+      <tr><th>Brand</th><td>${p.brand}</td></tr>
+      <tr><th>Model</th><td>${p.model}</td></tr>
+      <tr><th>Category</th><td>${displayCategory(p)}</td></tr>
+      ${p.caliber ? `<tr><th>Caliber / Gauge</th><td>${p.caliber}</td></tr>` : ''}
+      ${p.action ? `<tr><th>Action</th><td>${p.action}</td></tr>` : ''}
+      ${p.barrel_in ? `<tr><th>Barrel</th><td>${p.barrel_in}"</td></tr>` : ''}
+      ${p.capacity ? `<tr><th>Capacity</th><td>${p.capacity}</td></tr>` : ''}
+      ${p.finish ? `<tr><th>Finish</th><td>${p.finish}</td></tr>` : ''}
+      <tr><th>SKU</th><td>${p.sku}</td></tr>
+      <tr><th>UPC</th><td>${p.upc}</td></tr>
+    </table>
+    <p>${p.description || ''}</p>
+    ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}
+    <div id="compareSimilar"></div>`;
+  window.__pgImgs = (p.images || []).filter(Boolean);
+  initCompareSimilar(p);
+  window.__pgHi = (p.hires || []).filter(Boolean);
+  window.__pgIdx = 0;
+}
+function setPgImage(i) {
+  const imgs = window.__pgImgs || [];
+  if (!imgs[i]) return;
+  window.__pgIdx = i;
+  const main = document.getElementById('pgMain');
+  if (main) main.src = imgs[i];
+  document.querySelectorAll('.pthumb').forEach((t, j) => t.classList.toggle('active', j === i));
+  const lb = document.getElementById('plbImg');
+  if (lb) lb.src = (window.__pgHi || [])[i] || imgs[i];
+  const cnt = document.getElementById('plbCount');
+  if (cnt && imgs.length > 1) cnt.textContent = (i + 1) + ' / ' + imgs.length;
+}
+function openPgLightbox(i) {
+  const imgs = window.__pgImgs || [];
+  if (!imgs.length) return;
+  setPgImage(i || 0);
+  const box = document.getElementById('plightbox');
+  if (box) box.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closePgLightbox() {
+  const box = document.getElementById('plightbox');
+  if (box) box.classList.remove('open');
+  document.body.style.overflow = '';
+}
+function pgStep(d) {
+  const imgs = window.__pgImgs || [];
+  if (imgs.length < 2) return;
+  setPgImage((window.__pgIdx + d + imgs.length) % imgs.length);
+}
+/* Mobile lightbox swipe (2026-11-03): swipe left = next photo, right = previous, 50px threshold. */
+let __pgTouchX = null;
+document.addEventListener('touchstart', (e) => {
+  const box = document.getElementById('plightbox');
+  if (box && box.classList.contains('open')) __pgTouchX = e.touches[0].clientX;
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (__pgTouchX === null) return;
+  const dx = e.changedTouches[0].clientX - __pgTouchX; __pgTouchX = null;
+  if (Math.abs(dx) > 50) pgStep(dx < 0 ? 1 : -1);
+}, { passive: true });
+document.addEventListener('keydown', (e) => {
+  const box = document.getElementById('plightbox');
+  if (!box || !box.classList.contains('open')) return;
+  if (e.key === 'Escape') closePgLightbox();
+  if (e.key === 'ArrowLeft') pgStep(-1);
+  if (e.key === 'ArrowRight') pgStep(1);
+});
+document.addEventListener('DOMContentLoaded', () => {
+  // Mobile filter toggle (delegated, so buttons recreated by renderSidebar work too).
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.filter-toggle') : null;
+    if (!btn) return;
+    const aside = btn.closest('aside.filters');
+    if (!aside) return;
+    const open = aside.classList.toggle('filters-open');
+    btn.textContent = open ? 'Hide filters' : 'Show filters';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  initAgeGate(); initShop(); initCategoryGrid(); initProduct(); initFeatured(); initCartPage(); initFFLFinder(); updateCartBadge();
+});
+/* Compare similar (2026-11-03): the customer does NOT pick from 30,000
+   products — the site suggests up to 3 in-stock guns like this one
+   (same caliber first, then same subcategory/action, closest price),
+   shown side-by-side with differing specs highlighted. If fewer than
+   2 similar in-stock guns exist, the section stays hidden. Stock is
+   shown as "In stock" only, never a quantity. */
+async function initCompareSimilar(p) {
+  const box = document.getElementById('compareSimilar'); if (!box || !p.caliber) return;
+  try {
+    const res = await fetch('/api/products?caliber=' + encodeURIComponent(p.caliber_canonical || p.caliber) + '&inStock=1&limit=48');
+    if (!res.ok) return;
+    const data = await res.json();
+    let pool = (data.products || []).filter((x) => x.sku !== p.sku && x.price > 0);
+    // Score: same subcategory +3, same action +2, same brand +1, barrel within 1" +1, price closeness tiebreak.
+    pool = pool.map((x) => {
+      let s = 0;
+      if (x.subCategory && x.subCategory === p.subCategory) s += 3;
+      if (x.action && x.action === p.action) s += 2;
+      if (x.brand && x.brand === p.brand) s += 1;
+      if (x.barrel_in && p.barrel_in && Math.abs(x.barrel_in - p.barrel_in) <= 1) s += 1;
+      return { x, s, pdiff: Math.abs(x.price - p.price) };
+    }).sort((a, b) => (b.s - a.s) || (a.pdiff - b.pdiff)).map((o) => o.x).slice(0, 3);
+    if (pool.length < 1) return;
+    const cols = [p, ...pool];
+    const rows = [
+      ['Photo', (x) => `<img src="${(x.images || [])[0] || 'images/placeholder.svg'}" alt="${x.title}" style="width:90px;height:60px;object-fit:contain;background:#f0ede6;border-radius:6px">`],
+      ['Product', (x) => `<a href="product.html?sku=${encodeURIComponent(x.sku)}">${x.title}</a>`],
+      ['Price', (x) => money(x.price)],
+      ['Stock', (x) => 'In stock'],
+      ['Brand', (x) => x.brand || '—'],
+      ['Caliber', (x) => x.caliber || '—'],
+      ['Action', (x) => x.action || '—'],
+      ['Barrel', (x) => x.barrel_in ? x.barrel_in + '"' : '—'],
+      ['Capacity', (x) => x.capacity || '—'],
+      ['Finish', (x) => x.finish || '—'],
+    ];
+    const thead = '<tr><th></th>' + cols.map((x) => `<th>${x === p ? 'This gun' : x.title}</th>`).join('') + '</tr>';
+    const tbody = rows.map(([label, fn]) => {
+      const vals = cols.map(fn);
+      const differs = new Set(vals).size > 1;
+      return '<tr><th>' + label + '</th>' + vals.map((v) => `<td${differs ? ' class="cmp-diff"' : ''}>${v}</td>`).join('') + '</tr>';
+    }).join('');
+    box.innerHTML = '<h3>Compare with similar in-stock guns</h3><p class="meta">Suggested for you — same caliber, similar type. Highlighted cells are where they differ, so you can see the choice at a glance. Still unsure? Call (678) 691-6375 and we will talk it through.</p><div style="overflow-x:auto"><table class="specs cmp">' + thead + tbody + '</table></div>';
+  } catch (e) { /* compare is an enhancement — a failed fetch hides it */ }
+}
+/* Share a product (2026-11-03): one tap to send this exact gun to a
+   spouse, friend, or FFL dealer. Phone: native share sheet (WhatsApp,
+   text, email, etc.). Desktop / no share sheet: copy the product link
+   to the clipboard. No third-party share buttons, no trackers — the
+   product URL already carries the SKU, so the link opens this gun. */
+async function shareProduct() {
+  const msg = document.getElementById('shareMsg');
+  const url = location.href;
+  const text = document.title.replace(/ \| XL Arms$/, '') + ' at XL Arms — ' + url;
+  try {
+    if (navigator.share) { await navigator.share({ title: document.title, text: text, url: url }); if (msg) msg.textContent = 'Shared.'; return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; /* fall through to copy */ }
+  try {
+    await navigator.clipboard.writeText(url);
+    if (msg) msg.textContent = 'Link copied — paste it anywhere to share this gun.';
+  } catch (e) {
+    if (msg) msg.innerHTML = 'Copy this link: <span style="word-break:break-all">' + url.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
+  }
+}
+/* FFL dealer finder (2026-11-03): ZIP/city/state search over the RSR
+   dealer list via /api/ffl-dealers. Sorted by ZIP closeness when a ZIP
+   is given, otherwise state/city/name. No license numbers, no phone/email
+   — those are not in the source file. */
+async function initFFLFinder() {
+  const form = document.getElementById('fflSearch'); if (!form) return;
+  const out = document.getElementById('fflResults'); if (!out) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const zip = (document.getElementById('fflZip') || {}).value || '';
+    const city = (document.getElementById('fflCity') || {}).value || '';
+    const state = (document.getElementById('fflState') || {}).value || '';
+    out.innerHTML = '<p>Searching dealers…</p>';
+    try {
+      const params = new URLSearchParams();
+      if (zip.trim()) params.set('zip', zip.trim());
+      if (city.trim()) params.set('city', city.trim());
+      if (state.trim()) params.set('state', state.trim());
+      const res = await fetch('/api/ffl-dealers?' + params.toString());
+      const d = await res.json();
+      if (!d.dealers || !d.dealers.length) { out.innerHTML = '<p>No dealers found in our network for that search. Try a nearby ZIP or a state search, or call (678) 691-6375 — we can still ship to a licensed dealer not on this list.</p>'; return; }
+      const shown = d.dealers.length;
+      const countText = d.total > shown ? 'Showing the closest ' + shown + ' of ' + d.total + ' dealers in our network list, closest first' : d.total + ' dealer' + (d.total === 1 ? '' : 's') + ' found';
+      out.innerHTML = '<p>' + countText + '. Confirm the dealer accepts transfers and their fee before ordering.</p>' + d.dealers.map((x) => {
+        const addr = [x.street, x.city, x.state, x.zip].filter(Boolean).join(', ');
+        const maps = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+        return '<div class="cartitem"><div><strong>' + esc(x.name) + '</strong><div class="meta">' + esc(addr) + '</div><div><a href="' + maps + '" target="_blank" rel="noopener">Get directions →</a></div></div></div>';
+      }).join('');
+    } catch (err) { out.innerHTML = '<p>Dealer search could not load right now — please call (678) 691-6375 and we will help find a dealer near you.</p>'; }
+  });
+}
