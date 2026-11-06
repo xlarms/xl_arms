@@ -50,12 +50,34 @@ function updateCartBadge() {
   const n = getCart().reduce((a, i) => a + (i.qty || 1), 0);
   document.querySelectorAll('#cartCount').forEach((el) => { el.textContent = n; });
 }
-async function addToCart(sku) {
-  let p = null;
+// STATIC-FIRST PRODUCT LOOKUP (2026-11-06): product data is shipped as
+// plain per-letter JSON files (data/full-index-<letter>.json) with the
+// site, so the CDN serves a SKU's chunk in milliseconds instead of the
+// ~2.6s Netlify Blobs read the /api/products SKU path needs. The chunk
+// holds the FULL product record (description, features, hires, Prop 65),
+// same as the Blobs chunk it was exported from. Any failure (file not
+// deployed yet, 404, bad JSON) returns null and the caller falls back
+// to /api/products — never throws, never breaks the page.
+async function fetchStaticProduct(sku) {
   try {
-    const res = await fetch('/api/products?sku=' + encodeURIComponent(sku));
-    if (res.ok) { const d = await res.json(); p = (d.products || [])[0] || null; }
-  } catch (e) {}
+    if (!sku) return null;
+    const first = String(sku)[0].toUpperCase();
+    const letter = /^[A-Z]$/.test(first) ? first : '0';
+    const res = await fetch('data/full-index-' + letter + '.json');
+    if (!res.ok) return null;
+    const d = await res.json();
+    const list = (d && d.products) || [];
+    return list.find((x) => String(x.sku).toLowerCase() === String(sku).toLowerCase()) || null;
+  } catch (e) { return null; }
+}
+async function addToCart(sku) {
+  let p = await fetchStaticProduct(sku);
+  if (!p) {
+    try {
+      const res = await fetch('/api/products?sku=' + encodeURIComponent(sku));
+      if (res.ok) { const d = await res.json(); p = (d.products || [])[0] || null; }
+    } catch (e) {}
+  }
   if (!p) {
     try { const r = await fetch('data/products.json'); const d = await r.json(); p = (d.products || []).find((x) => x.sku === sku) || null; } catch (e) {}
   }
@@ -558,11 +580,13 @@ async function initProduct() {
   const el = document.getElementById('product');
   if (!el) return;
   const sku = new URLSearchParams(location.search).get('sku');
-  let p = null;
-  try {
-    const res = await fetch('/api/products?sku=' + encodeURIComponent(sku || ''));
-    if (res.ok) { const data = await res.json(); p = (data.products || [])[0] || null; }
-  } catch (e) { /* fallback below */ }
+  let p = await fetchStaticProduct(sku);
+  if (!p) {
+    try {
+      const res = await fetch('/api/products?sku=' + encodeURIComponent(sku || ''));
+      if (res.ok) { const data = await res.json(); p = (data.products || [])[0] || null; }
+    } catch (e) { /* fallback below */ }
+  }
   if (!p) {
     const res = await fetch('data/products.json');
     const data = await res.json();
