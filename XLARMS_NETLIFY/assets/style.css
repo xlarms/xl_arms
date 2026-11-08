@@ -233,3 +233,25 @@ body.home .tile p { color: #dddddd; }
 table.cmp { min-width: 560px; }
 table.cmp td.cmp-diff { background: #fff3cd; color: #111111; font-weight: 600; }
 table.cmp td.cmp-diff a { color: #8a1216; }
+
+/* Sticky mobile Call button (2026-11-08, call-first): fixed bottom bar on
+   phones only (<=760px, the site's existing mobile breakpoint). Desktop is
+   unchanged. Body bottom padding keeps the bar from covering footer content;
+   the mobile filter button is in-flow, not fixed, so there is no overlap. */
+.callbar { display: none; }
+.callhero { font-size: 19px; }
+@media (max-width: 760px) {
+  body { padding-bottom: 64px; }
+  .callbar {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    height: 56px; background: #d8232a;
+    box-shadow: 0 -2px 10px rgba(0,0,0,.4);
+  }
+  .callbar a {
+    display: block; width: 100%; text-align: center;
+    color: #fff; text-decoration: none; font-weight: 700; font-size: 18px;
+    font-family: 'Oswald', 'Arial Narrow', Arial, sans-serif;
+    letter-spacing: .4px; padding: 16px 0;
+  }
+}
