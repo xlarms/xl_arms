@@ -12,18 +12,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/style.css?v=20261108a">
 <style>
-.cfg-stage{position:relative;max-width:760px;margin:0 auto;background:#fff;border:1px solid #ddd}
-.cfg-stage img.gun{width:100%;display:block}
+.cfg-stage{position:relative;max-width:760px;margin:0 auto;background:#fff;border:1px solid #ddd;aspect-ratio:8/6.5;overflow:hidden}
+.cfg-stage img.gun{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;object-position:bottom}
 .cfg-stage img.ovl{position:absolute;mix-blend-mode:multiply;pointer-events:none;display:none}
 .cfg-stage img.ovl.on{display:block}
 .cfg-note{font-size:13px;color:#666;text-align:center;margin:6px 0 0}
 .cfg-steps{display:grid;gap:18px;margin-top:22px}
 .cfg-step h2{font-size:20px;margin:0 0 8px}
 .cfg-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
-.cfg-card{border:2px solid #ddd;background:#fff;padding:10px;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.cfg-card{border:2px solid #ddd;background:#fff;padding:10px;cursor:pointer;text-align:left;font:inherit;color:#1F1A14}
 .cfg-card img{width:100%;height:110px;object-fit:contain;background:#fff}
-.cfg-card .nm{font-weight:600;margin-top:6px}
-.cfg-card .pr{font-weight:700}
+.cfg-card .nm{font-weight:600;margin-top:6px;color:#1F1A14}
+.cfg-card .pr{font-weight:700;color:#1F1A14}
 .cfg-card .fit{font-size:13px;color:#4F6035}
 .cfg-card.sel{border-color:#B8922C;box-shadow:0 0 0 2px #B8922C inset}
 .cfg-card.dis{opacity:.45;cursor:not-allowed}
@@ -57,7 +57,7 @@
     <img class="ovl" id="dotImg" alt="">
     <img class="ovl" id="lightImg" alt="">
   </div>
-  <p class="cfg-note">Preview built from our real product photos — not a photo of the finished combo. Accessory positions are approximate in this first version.</p>
+  <p class="cfg-note">Preview: for the Osight K combos this is the mockup photo you approved; other dots are layered from our real product photos onto the real gun photo. Either way it is a preview, not a photo of the finished combo.</p>
 
   <div class="cfg-steps">
     <section class="cfg-step"><h2>1. Your pistol</h2><div class="cfg-cards" id="pistolCards"></div></section>
@@ -110,13 +110,13 @@ var pistols=[
  {sku:"GLUX4350204NR15BLK2SCT",name:"Glock 43X Blackout 9mm, 3.41\" threaded barrel",price:750,plate:"CPGLX-HOLOK",plateName:"C&H plate — Glock 43X MOS to Holosun 407K/507K",lights:["STL69286","CMTLTG773"]}
 ];
 var dots=[
- {sku:"OSIGHTKRD",name:"Osight K red dot, 6 MOA",price:159.99,needsPlate:false,fit:"Direct fit — no plate needed"},
- {sku:"OSIGHTKGN",name:"Osight K green dot, 6 MOA",price:159.99,needsPlate:false,fit:"Direct fit — no plate needed"},
- {sku:"HSHS407K-X2",name:"Holosun 407K X2 red dot, 6 MOA",price:224.99,needsPlate:true,fit:"Needs adapter plate (+$51.99, added automatically)"},
- {sku:"HSHE407K-GR-X2",name:"Holosun 407K X2 green dot, 6 MOA",price:239.99,needsPlate:true,fit:"Needs adapter plate (+$51.99, added automatically)"},
- {sku:"HSHS507K-X2",name:"Holosun 507K X2 red dot",price:295.99,needsPlate:true,fit:"Needs adapter plate (+$51.99, added automatically)"},
- {sku:"HSHE507K-GR-X2",name:"Holosun 507K X2 green dot",price:319.99,needsPlate:true,fit:"Needs adapter plate (+$51.99, added automatically)"},
- {sku:"HSEPS-CARRY-RD-2",name:"Holosun EPS Carry red dot, 2 MOA",price:329.99,needsPlate:false,fit:"Direct fit — no plate needed"}
+ {sku:"OSIGHTKRD",name:"Osight K red dot, 6 MOA",price:159.99,needsPlate:false,kind:"osight",fit:"Direct fit — no plate needed"},
+ {sku:"OSIGHTKGN",name:"Osight K green dot, 6 MOA",price:159.99,needsPlate:false,kind:"osight-hi",img:"https://xlarms-new.b-cdn.net/products-hi/OSIGHTKGN/1.jpg",fit:"Direct fit — no plate needed"},
+ {sku:"HSHS407K-X2",name:"Holosun 407K X2 red dot, 6 MOA",price:224.99,needsPlate:true,kind:"holosun",fit:"Needs adapter plate (+$51.99, added automatically)"},
+ {sku:"HSHE407K-GR-X2",name:"Holosun 407K X2 green dot, 6 MOA",price:239.99,needsPlate:true,kind:"holosun",fit:"Needs adapter plate (+$51.99, added automatically)"},
+ {sku:"HSHS507K-X2",name:"Holosun 507K X2 red dot",price:295.99,needsPlate:true,kind:"holosun",fit:"Needs adapter plate (+$51.99, added automatically)"},
+ {sku:"HSHE507K-GR-X2",name:"Holosun 507K X2 green dot",price:319.99,needsPlate:true,kind:"holosun",fit:"Needs adapter plate (+$51.99, added automatically)"},
+ {sku:"HSEPS-CARRY-RD-2",name:"Holosun EPS Carry red dot, 2 MOA",price:329.99,needsPlate:false,kind:"eps",fit:"Direct fit — no plate needed"}
 ];
 var lights=[
  {sku:"STL69286",name:"Streamlight TLR-6 with laser — for Glock 43X/48",price:235.87},
@@ -126,9 +126,24 @@ var sel={pistol:pistols[0],dot:null,light:null};
 var money=function(n){return "$"+n.toFixed(2);};
 function card(item,extra,onclick,selected,disabled){
   var b=document.createElement("button");b.type="button";b.className="cfg-card"+(selected?" sel":"")+(disabled?" dis":"");
-  b.innerHTML='<img src="'+CDN+item.sku+'/1.jpg" alt=""><div class="nm">'+item.name+'</div><div class="pr">'+money(item.price)+'</div>'+(extra||"");
+  b.innerHTML='<img src="'+(item.img||CDN+item.sku+'/1.jpg')+'" alt=""><div class="nm">'+item.name+'</div><div class="pr">'+money(item.price)+'</div>'+(extra||"");
   if(!disabled)b.onclick=onclick;return b;
 }
+/* Dot overlay positions, measured from the real gun photos (fractions of the stage).
+   Stage is 8/6.5 with the gun photo bottom-anchored; slide tops: Glock 0.350, Shield 0.331. */
+var DOTPOS={
+ "SW14095":{osight:{left:.567,top:.186,w:.307},"osight-hi":{left:.594,top:.181,w:.173},holosun:{left:.626,top:.224,w:.188},eps:{left:.626,top:.219,w:.196}},
+ "GLUX4350204NR15BLK2SCT":{osight:{left:.467,top:.205,w:.307},"osight-hi":{left:.534,top:.200,w:.173},holosun:{left:.526,top:.243,w:.188},eps:{left:.526,top:.238,w:.196}}
+};
+/* Approved mockup photos for the Osight K combos (the ones Jonathan called perfect). */
+var MOCKUPS={
+ "GLUX4350204NR15BLK2SCT|OSIGHTKRD|":"images/configurator/glock-osight.webp",
+ "GLUX4350204NR15BLK2SCT|OSIGHTKGN|":"images/configurator/glock-osight.webp",
+ "GLUX4350204NR15BLK2SCT|OSIGHTKRD|STL69286":"images/configurator/glock-osight-tlr6.webp",
+ "GLUX4350204NR15BLK2SCT|OSIGHTKGN|STL69286":"images/configurator/glock-osight-tlr6.webp",
+ "SW14095|OSIGHTKRD|":"images/configurator/shield-osight.webp",
+ "SW14095|OSIGHTKGN|":"images/configurator/shield-osight.webp"
+};
 function renderPistols(){
   var w=document.getElementById("pistolCards");w.innerHTML="";
   pistols.forEach(function(p){
@@ -163,14 +178,27 @@ function renderLights(){
 }
 function renderAll(){
   renderPistols();renderDots();renderLights();
-  document.getElementById("gunImg").src=CDN+sel.pistol.sku+"/1.jpg";
-  document.getElementById("gunImg").alt=sel.pistol.name;
+  var gunEl=document.getElementById("gunImg");
   var di=document.getElementById("dotImg");
-  if(sel.dot){di.src=CDN+sel.dot.sku+"/1.jpg";di.className="ovl on";di.style.cssText="left:44%;top:6%;width:20%";}
-  else{di.className="ovl";di.removeAttribute("src");}
   var li=document.getElementById("lightImg");
-  if(sel.light){li.src=CDN+sel.light.sku+"/1.jpg";li.className="ovl on";li.style.cssText="left:30%;top:58%;width:34%";}
-  else{li.className="ovl";li.removeAttribute("src");}
+  li.className="ovl";li.removeAttribute("src");
+  var key=sel.pistol.sku+"|"+(sel.dot?sel.dot.sku:"")+"|"+(sel.light?sel.light.sku:"");
+  var mock=MOCKUPS[key];
+  var note=document.querySelector(".cfg-note");
+  if(mock){
+    gunEl.src=mock;gunEl.alt="Preview: "+sel.pistol.name+" with "+(sel.dot?sel.dot.name:"")+(sel.light?" and "+sel.light.name:"");
+    di.className="ovl";di.removeAttribute("src");
+    note.textContent="Preview: the mockup photo you approved for this combo — not a photo of the finished gun.";
+  }else{
+    gunEl.src=CDN+sel.pistol.sku+"/1.jpg";
+    gunEl.alt=sel.pistol.name;
+    if(sel.dot){
+      var p=DOTPOS[sel.pistol.sku][sel.dot.kind];
+      di.src=sel.dot.img||CDN+sel.dot.sku+"/1.jpg";di.className="ovl on";
+      di.style.left=(p.left*100)+"%";di.style.top=(p.top*100)+"%";di.style.width=(p.w*100)+"%";
+    }else{di.className="ovl";di.removeAttribute("src");}
+    note.textContent=sel.light?"Preview: dot layered from our real product photos onto the real gun photo. The light is in your build below — the preview shows the dot only for this combination.":"Preview: dot layered from our real product photos onto the real gun photo — not a photo of the finished combo.";
+  }
   var items=[{name:sel.pistol.name,price:sel.pistol.price,sku:sel.pistol.sku}];
   if(sel.dot){items.push({name:sel.dot.name,price:sel.dot.price,sku:sel.dot.sku});
     if(sel.dot.needsPlate)items.push({name:sel.pistol.plateName,price:PLATE_PRICE,sku:sel.pistol.plate});}
