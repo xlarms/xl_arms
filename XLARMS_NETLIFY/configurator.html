@@ -142,7 +142,12 @@ var MOCKUPS={
  "GLUX4350204NR15BLK2SCT|OSIGHTKRD|STL69286":"images/configurator/glock-osight-tlr6.webp",
  "GLUX4350204NR15BLK2SCT|OSIGHTKGN|STL69286":"images/configurator/glock-osight-tlr6.webp",
  "SW14095|OSIGHTKRD|":"images/configurator/shield-osight.webp",
- "SW14095|OSIGHTKGN|":"images/configurator/shield-osight.webp"
+ "SW14095|OSIGHTKGN|":"images/configurator/shield-osight.webp",
+ "GLUX4350204NR15BLK2SCT|HSHS407K-X2|":"images/configurator/glock-407k.webp",
+ "GLUX4350204NR15BLK2SCT|HSHE407K-GR-X2|":"images/configurator/glock-407k.webp",
+ "GLUX4350204NR15BLK2SCT|HSHS507K-X2|":"images/configurator/glock-507k.webp",
+ "GLUX4350204NR15BLK2SCT|HSHE507K-GR-X2|":"images/configurator/glock-507k.webp",
+ "GLUX4350204NR15BLK2SCT|HSEPS-CARRY-RD-2|":"images/configurator/glock-eps.webp"
 };
 function renderPistols(){
   var w=document.getElementById("pistolCards");w.innerHTML="";
@@ -183,7 +188,7 @@ function renderAll(){
   var li=document.getElementById("lightImg");
   li.className="ovl";li.removeAttribute("src");
   var key=sel.pistol.sku+"|"+(sel.dot?sel.dot.sku:"")+"|"+(sel.light?sel.light.sku:"");
-  var mock=MOCKUPS[key];
+  var mock=MOCKUPS[key]||MOCKUPS[sel.pistol.sku+"|"+(sel.dot?sel.dot.sku:"")+"|"];
   var note=document.querySelector(".cfg-note");
   if(mock){
     gunEl.src=mock;gunEl.alt="Preview: "+sel.pistol.name+" with "+(sel.dot?sel.dot.name:"")+(sel.light?" and "+sel.light.name:"");
