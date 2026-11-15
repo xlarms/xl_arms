@@ -756,7 +756,7 @@ async function initCompareSimilar(p) {
       ['Photo', (x) => `<img src="${(x.images || [])[0] || 'images/placeholder.svg'}" alt="${x.title}" style="width:90px;height:60px;object-fit:contain;background:#f0ede6;border-radius:6px">`],
       ['Product', (x) => `<a href="product.html?sku=${encodeURIComponent(x.sku)}">${x.title}</a>`],
       ['Price', (x) => money(x.price)],
-      ['Stock', (x) => 'In stock'],
+      ['Stock', (x) => x.stock_qty > 0 ? 'In stock' : 'Out of stock'],
       ['Brand', (x) => x.brand || '—'],
       ['Caliber', (x) => x.caliber || '—'],
       ['Action', (x) => x.action || '—'],
