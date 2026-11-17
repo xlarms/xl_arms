@@ -602,6 +602,69 @@ function initAgeGate() {
     if (denied) denied.style.display = 'block';
   };
 }
+// LIVE STOCK CHECK (2026-11-17): the static chunk a product page renders
+// from is only as fresh as the last static re-export, but guns sell out
+// daily. After the page renders from the static record, fetch the live SKU
+// record (SKU lookups are uncached by design) and, if the live stock
+// disagrees, correct the stock badge, the Add to Cart / Notify Me area,
+// the JSON-LD availability, and the compare table's "This gun" stock cell
+// from the live value. Static-first render is unchanged — this is a
+// background correction only, and a failed live fetch leaves the static
+// render exactly as-is.
+const pgStockHtml = (prod) => prod.stock_qty > 0 ? '<span class="instock">In stock</span>' : '<span class="outstock">Out of stock</span>';
+const pgActionHtml = (prod) => {
+  const escSku = String(prod.sku).replace(/'/g, "\\'");
+  return prod.price > 0
+    ? (prod.stock_qty > 0
+      ? `<button class="btn" onclick="addToCart('${escSku}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>`
+      : `<form class="notifyform" onsubmit="return notifyStock(event, '${escSku}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`)
+    : `<a class="btn" href="tel:+16786916375">Call for Price</a>`;
+};
+let __liveStock = null; // cached live { sku, stock_qty } for this product page
+async function refreshLiveStock(p) {
+  if (!p || !p.sku) return;
+  try {
+    if (!__liveStock || __liveStock.sku !== p.sku) {
+      try {
+        const res = await fetch('/api/products?sku=' + encodeURIComponent(p.sku));
+        if (res.ok) {
+          const d = await res.json();
+          const live = (d.products || [])[0];
+          if (live) __liveStock = { sku: p.sku, stock_qty: live.stock_qty };
+        }
+      } catch (e) { /* live check failed — keep the static render */ }
+    }
+    if (!__liveStock) return;
+    const liveIn = __liveStock.stock_qty > 0;
+    if (liveIn === (p.stock_qty > 0)) return; // live agrees with static — nothing to correct
+    const liveP = { ...p, stock_qty: __liveStock.stock_qty };
+    const stockEl = document.getElementById('pgStock');
+    if (stockEl) stockEl.innerHTML = pgStockHtml(liveP);
+    const actionEl = document.getElementById('pgAction');
+    if (actionEl) actionEl.innerHTML = pgActionHtml(liveP);
+    const ld = document.getElementById('pgJsonLd');
+    if (ld) {
+      try {
+        const data = JSON.parse(ld.textContent);
+        data.offers.availability = liveIn ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
+        ld.textContent = JSON.stringify(data);
+      } catch (e) { /* JSON-LD correction only */ }
+    }
+    // Compare table "This gun" column (first data column) — its stock came
+    // from the same stale static record.
+    const rows = document.querySelectorAll('#compareSimilar table tr');
+    for (const tr of rows) {
+      const th = tr.querySelector('th');
+      if (!th || th.textContent.trim() !== 'Stock') continue;
+      const td = tr.querySelector('td');
+      if (!td) continue;
+      td.textContent = liveIn ? 'In stock' : 'Out of stock';
+      const vals = [...tr.querySelectorAll('td')].map((c) => c.textContent);
+      const differs = new Set(vals).size > 1;
+      tr.querySelectorAll('td').forEach((c) => c.classList.toggle('cmp-diff', differs));
+    }
+  } catch (e) { /* background correction must never break the page */ }
+}
 async function initProduct() {
   const el = document.getElementById('product');
   if (!el) return;
@@ -625,10 +688,11 @@ async function initProduct() {
     document.title = p.title + ' | XL Arms';
     const ld = document.createElement('script');
     ld.type = 'application/ld+json';
+    ld.id = 'pgJsonLd';
     ld.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.sku, mpn: p.sku, brand: { '@type': 'Brand', name: p.brand }, category: displayCategory(p), offers: { '@type': 'Offer', price: p.price, priceCurrency: 'USD', availability: p.stock_qty > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock', url: location.href } });
     document.head.appendChild(ld);
   } catch (e) { /* SEO enhancement only */ }
-  const stock = p.stock_qty > 0 ? `<span class="instock">In stock</span>` : `<span class="outstock">Out of stock</span>`;
+  const stock = pgStockHtml(p);
   const ffl = p.is_firearm
     ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
     : `<div class="ffl"><strong>Ships normally.</strong> Ammunition and accessories do not require an FFL transfer, but state shipping restrictions still apply at checkout.</div>`;
@@ -644,8 +708,8 @@ async function initProduct() {
       <img id="plbImg" src="" alt="">
       ${(p.images || []).length > 1 ? `<div class="plb-bar"><button class="plb-btn plb-bar-btn" onclick="pgStep(-1)" aria-label="Previous image">‹ Previous</button><span id="plbCount" class="plb-count"></span><button class="plb-btn plb-bar-btn" onclick="pgStep(1)" aria-label="Next image">Next ›</button></div>` : ''}
     </div>
-    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div>${stock}</div>${ffl}
-    <p>${p.price > 0 ? (p.stock_qty > 0 ? `<button class="btn" onclick="addToCart('${String(p.sku).replace(/'/g, "\\'")}')">Add to Cart</button> <a class="btn btn-dark" href="cart.html">View Cart →</a>` : `<form class="notifyform" onsubmit="return notifyStock(event, '${String(p.sku).replace(/'/g, "\\'")}')"><input type="email" required placeholder="Email for restock alert" aria-label="Email for restock alert"><button type="submit">Notify Me When In Stock</button></form>`) : `<a class="btn" href="tel:+16786916375">Call for Price</a>`}</p>
+    <div class="price">${p.price > 0 ? money(p.price) : 'Call for price'}</div><div id="pgStock">${stock}</div>${ffl}
+    <p id="pgAction">${pgActionHtml(p)}</p>
     <p><button class="btn btn-dark" onclick="shareProduct()">Share this gun →</button> <span id="shareMsg" class="meta"></span></p>
     <table class="specs">
       <tr><th>Brand</th><td>${p.brand}</td></tr>
@@ -663,7 +727,8 @@ async function initProduct() {
     ${p.prop65Message ? `<p><em>${p.prop65Message}</em></p>` : ''}
     <div id="compareSimilar"></div>`;
   window.__pgImgs = (p.images || []).filter(Boolean);
-  initCompareSimilar(p);
+  refreshLiveStock(p); // background correction; re-run below catches the compare cell
+  initCompareSimilar(p).finally(() => refreshLiveStock(p));
   window.__pgHi = (p.hires || []).filter(Boolean);
   window.__pgIdx = 0;
 }
