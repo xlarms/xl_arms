@@ -34,3 +34,25 @@
 # Only ever deletes objects under the private intake-private/ prefix.
 [functions."intake-cleanup"]
   schedule = "0 9 * * *"
+
+# Daily RSR catalog import (added 2026-11-17 — the catalog had not been
+# updated since 2026-11-03 because this function had no schedule; the shop
+# was serving two-week-old prices/stock). Runs 6 AM UTC daily. The importer
+# downloads the latest RSR inventory, validates, and publishes atomically
+# to the Blobs store; a failed run keeps the previous catalog.
+# HONEST LIMIT: a scheduled Blobs import alone does NOT refresh the static
+# data/full-index-*.json files that product pages read first, nor the
+# bundled catalog-index or featured-pools.json — those still need a
+# re-export + deploy after each import (see the regeneration rule in the
+# project notes). The schedule keeps the API/list data fresh; the static
+# files lag until re-exported.
+[functions."rsr-import-background"]
+  schedule = "0 6 * * *"
+
+# Daily full-index rebuild (added 2026-11-17, runs 7 AM UTC — one hour
+# after the import). The SKU API reads the Blobs per-letter chunks, so
+# the chunks must be rebuilt after each daily import or the API keeps
+# returning the previous day's stock. This builder only writes
+# full-index-*.json keys; it never touches products.json.
+[functions."full-index-build-background"]
+  schedule = "0 7 * * *"
