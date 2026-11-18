@@ -325,6 +325,7 @@
     if (!box) return;
     var isPickup = data.fulfillment === 'pickup';
     box.innerHTML = '<h2>Order confirmed — thank you</h2>'
+      + (data.testMode ? '<p><strong>TEST MODE — no money moved.</strong> This was a test transaction; nothing was charged.</p>' : '')
       + '<p><strong>Order number:</strong> ' + esc(data.orderId) + '<br>'
       + '<strong>Authorize.net transaction:</strong> ' + esc(data.transactionId) + '<br>'
       + '<strong>Charged today:</strong> ' + money(data.amount) + '</p>'

@@ -380,6 +380,7 @@ exports.handler = async (event) => {
 
   let ctr;
   let gatewayError = null;
+  let data = null;
   try {
     const res = await fetch(apiUrl(m), {
       method: 'POST',
@@ -387,7 +388,6 @@ exports.handler = async (event) => {
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    let data = null;
     try { data = JSON.parse(text); } catch (e) { /* non-JSON reply */ }
     ctr = data && data.createTransactionResponse;
     // Authorize.net returns some gateway-level errors (e.g. E00007
@@ -404,6 +404,29 @@ exports.handler = async (event) => {
   } catch (e) {
     console.error('authnet-charge: Authorize.net request failed:', e && e.message);
     return fail(502, `The payment system did not answer. Nothing was charged. Please try again or call ${PHONE}.`);
+  }
+  // Test mode (Transaction Processing Mode disabled) never creates a
+  // transaction: the gateway answers with a flat "Successful." and no
+  // createTransactionResponse at all. Treat that as a test approval —
+  // no money moves and there is no transaction ID — so the checkout flow
+  // can be verified end to end. A real (processing-on) approval always
+  // carries a transactionResponse, so this can never mark a live charge
+  // as paid.
+  let testMode = false;
+  if (!ctr && data && data.messages && data.messages.resultCode === 'Ok') {
+    testMode = true;
+    ctr = {
+      messages: data.messages,
+      transactionResponse: {
+        responseCode: '1',
+        transId: '0',
+        authCode: '',
+        avsResultCode: '',
+        accountType: '',
+        accountNumber: '',
+      },
+    };
+    console.log(`authnet-charge ${orderId}: test-mode approval (no transaction created, transId 0).`);
   }
   if (!ctr) {
     console.error('authnet-charge: no createTransactionResponse from Authorize.net', gatewayError || '');
@@ -445,7 +468,7 @@ exports.handler = async (event) => {
         mode: m,
       },
       submitted_at: now.toISOString(),
-      status: 'paid',
+      status: testMode ? 'test' : 'paid',
     };
 
     if (process.env.WASABI_BUCKET && process.env.WASABI_KEY && process.env.WASABI_SECRET) {
@@ -486,8 +509,8 @@ exports.handler = async (event) => {
         await mailer.sendMail({
           from: ALERT_FROM,
           to: ALERT_TO,
-          subject: `New online order ${orderId} — ${money(chargeCents)} — ${fulfillment === 'pickup' ? 'Norcross pickup' : 'Ship to FFL'}`,
-          text: `New online order — charged ${money(chargeCents)} via Authorize.net (${m}).\n\nOrder: ${orderId}\nAuthorize.net transaction: ${record.transaction.transId} (auth ${record.transaction.authCode || 'n/a'})\nCard: ${record.transaction.cardType || ''} ending ${record.transaction.cardLast4 || 'n/a'}\n\nCustomer: ${firstName} ${lastName}\nPhone: ${phone}\nEmail: ${email}\n\nItems:\n${itemLines}\n\nItems total: ${money(itemsCents)}${fulfillment === 'ship' ? `\nShipping: ${money(shippingCents)}` : ''}\nCharged today: ${money(chargeCents)}${pickupText}${fflText}${shipText}\nOrder record: Wasabi ${ORDERS_PREFIX}/${orderId}/record.json\n`,
+          subject: `${testMode ? 'TEST — ' : ''}New online order ${orderId} — ${money(chargeCents)} — ${fulfillment === 'pickup' ? 'Norcross pickup' : 'Ship to FFL'}`,
+          text: `${testMode ? `TEST approval — no money moved (would charge ${money(chargeCents)} via Authorize.net (${m})).` : `New online order — charged ${money(chargeCents)} via Authorize.net (${m}).`}\n\nOrder: ${orderId}\nAuthorize.net transaction: ${record.transaction.transId} (auth ${record.transaction.authCode || 'n/a'})\nCard: ${record.transaction.cardType || ''} ending ${record.transaction.cardLast4 || 'n/a'}\n\nCustomer: ${firstName} ${lastName}\nPhone: ${phone}\nEmail: ${email}\n\nItems:\n${itemLines}\n\nItems total: ${money(itemsCents)}${fulfillment === 'ship' ? `\nShipping: ${money(shippingCents)}` : ''}\nCharged today: ${money(chargeCents)}${pickupText}${fflText}${shipText}\nOrder record: Wasabi ${ORDERS_PREFIX}/${orderId}/record.json\n`,
         });
       } catch (e) {
         console.error(`authnet-charge ${orderId}: order email failed (charge succeeded, record stored):`, e && e.message);
@@ -505,6 +528,7 @@ exports.handler = async (event) => {
       fulfillment,
       balanceDueAtPickup: fulfillment === 'pickup' ? balanceDueCents / 100 : null,
       mode: m,
+      testMode,
     });
   }
 
