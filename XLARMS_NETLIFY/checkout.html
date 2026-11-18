@@ -9,6 +9,24 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/style.css?v=20261108a">
+<style>
+/* Checkout form styles (kept on this page only, so the shared stylesheet
+   and its cache-busting tag stay untouched). Inputs are light with dark
+   text, same as the pickup-intake form, so they read on the dark page. */
+.co-field { display: block; margin: 10px 0; font-weight: 600; }
+.co-field input, .co-field select { display: block; width: 100%; box-sizing: border-box; padding: 12px; font-size: 16px; border: 1px solid #bbb; border-radius: 8px; background: #fff; color: #111; margin-top: 4px; }
+.co-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.co-row .co-field { flex: 1; min-width: 140px; }
+.fulfill-card { border: 2px solid #333; padding: 16px 20px; border-radius: 8px; cursor: pointer; display: block; margin-bottom: 12px; }
+.fulfill-card.selected { border-color: #d8232a; background: #1a1a1a; }
+.fulfill-card input { margin-right: 8px; }
+.fulfill-card h2 { margin: 0 0 8px; }
+.co-section { border: 2px solid #333; padding: 20px; border-radius: 8px; margin: 16px 0; }
+.co-section h2 { margin-top: 0; }
+.co-error { background: #5a1114; border: 1px solid #d8232a; color: #ffd7d7; padding: 12px 14px; border-radius: 8px; margin: 12px 0; }
+.co-banner { background: #3a2f10; border: 1px solid #b8922c; color: #ffe9a8; padding: 12px 14px; border-radius: 8px; margin: 12px 0; }
+.co-totals p { margin: 6px 0; }
+</style>
 </head>
 <body>
 <div class="topbar"><div class="wrap"><span>Premium Firearms &amp; Tactical Gear — Norcross, GA</span><span><a href="account.html">Account</a><a href="index.html#help">Help</a><a href="ffl.html">FFL Dealers</a><a href="contact.html">Contact Us</a></span></div></div>
@@ -23,45 +41,125 @@
 </div></header>
 <main class="wrap">
   <p><a href="cart.html">← Back to cart</a></p>
-  <h1>Checkout — Choose One</h1>
+  <h1>Checkout</h1>
   <p>Choose how you want to receive your firearm. You must choose one — the background check, the fee, and the payment all follow the option you pick. Firearms are never shipped to your home address.</p>
-  <div style="display:grid;gap:16px;max-width:800px">
-    <section style="border:2px solid #333;padding:20px;border-radius:8px">
-      <h2>Option 1 — Norcross Office Pickup</h2>
-      <ul>
-        <li>Send your pickup information ahead through the intake page — no Adobe, no printing, no scanning</li>
-        <li><strong>$15 background-check service fee</strong> (not a deposit), paid upfront for the pre-NICS service</li>
-        <li>If you pass and purchase the gun, the $15 is <strong>credited toward the price</strong> — you pay only the balance at pickup (example: $539 gun, $15 upfront, $524 due at pickup)</li>
-        <li>If you are denied, including a delayed check that later comes back denied, the $15 service fee is kept, for the service performed</li>
-        <li>Once you have paid, there is no cancellation — the check runs immediately</li>
-        <li>If XL Arms cannot deliver the gun, the $15 is refunded</li>
-        <li>You <strong>pay on pickup</strong>, not the full price online — the balance only, after the $15 credit</li>
-        <li>Bring your original Georgia ID/license and <strong>sign the official Form 4473 again in person</strong> at pickup</li>
-      </ul>
-      <p><a class="btn" href="pickup-intake.html">Choose pickup — send your pickup information →</a></p>
-      <p class="meta">The $15 service fee is collected once the payment route is approved — the exact payment step will be confirmed with you by phone before you are charged. Until then, call (678) 691-6375 to arrange pickup.</p>
-    </section>
-    <section style="border:2px solid #333;padding:20px;border-radius:8px">
-      <h2>Option 2 — Ship to Your FFL Dealer</h2>
-      <ul>
-        <li>Choose a licensed FFL dealer near you to receive the firearm — <a href="ffl.html">Find a dealer near you →</a></li>
-        <li><strong>No $15 fee, no pre-NICS from XL Arms</strong> — your receiving FFL handles the background check</li>
-        <li>Pay the full price online once online checkout is live (payment gateway to be confirmed)</li>
-        <li>Complete the Form 4473 and background check at your FFL's counter before taking possession</li>
-      </ul>
-      <p><a class="btn" href="contact.html">Choose ship to FFL — call to order →</a></p>
-      <p class="meta">Online checkout is coming soon — payment gateway still to be confirmed, so no real order is placed from this page yet. For now, call (678) 691-6375 to order for ship-to-FFL.</p>
-    </section>
+
+  <div id="checkoutUnavailable" class="co-banner" style="display:none"></div>
+
+  <div id="orderSummaryWrap">
+    <div id="orderSummary"></div>
+    <div id="emptyCart" style="display:none"><p>Your cart is empty.</p><p><a class="btn" href="shop.html">Shop all products →</a></p></div>
   </div>
+
+  <form id="checkoutForm" novalidate>
+    <div class="co-section">
+      <h2>1 — How do you want to receive it?</h2>
+      <label class="fulfill-card selected" id="fulfillPickup">
+        <input type="radio" name="fulfillment" id="fulfillPickupRadio" value="pickup" checked>
+        <strong>Norcross Office Pickup</strong>
+        <ul>
+          <li><strong>$15 background-check service fee</strong> (not a deposit), paid online now for the pre-NICS service — the only money taken online for a pickup order</li>
+          <li>If you pass and purchase the gun, the $15 is <strong>credited toward the price</strong> — you pay only the balance at pickup (example: $539 gun, $15 upfront, $524 due at pickup)</li>
+          <li>If you are denied, including a delayed check that later comes back denied, the $15 service fee is kept, for the service performed</li>
+          <li>Once you have paid, there is no cancellation — the check runs immediately</li>
+          <li>If XL Arms cannot deliver the gun, the $15 is refunded</li>
+          <li>After paying, send your pickup information through the <a href="pickup-intake.html">pickup intake page</a> — bring your original Georgia ID/license and <strong>sign the official Form 4473 again in person</strong> at pickup</li>
+        </ul>
+      </label>
+      <label class="fulfill-card" id="fulfillShip">
+        <input type="radio" name="fulfillment" id="fulfillShipRadio" value="ship">
+        <strong>Ship to Your FFL Dealer</strong>
+        <ul>
+          <li>Choose a licensed FFL dealer near you to receive the firearm — <a href="ffl.html">Find a dealer near you →</a></li>
+          <li><strong>No $15 fee, no pre-NICS from XL Arms</strong> — your receiving FFL handles the background check</li>
+          <li>Pay the full price online now (items + shipping)</li>
+          <li>Complete the Form 4473 and background check at your FFL's counter before taking possession</li>
+        </ul>
+      </label>
+    </div>
+
+    <div class="co-section">
+      <h2>2 — Your details</h2>
+      <div class="co-row">
+        <label class="co-field">First name<input id="coFirstName" autocomplete="given-name" required></label>
+        <label class="co-field">Last name<input id="coLastName" autocomplete="family-name" required></label>
+      </div>
+      <div class="co-row">
+        <label class="co-field">Phone<input id="coPhone" type="tel" autocomplete="tel" required></label>
+        <label class="co-field">Email<input id="coEmail" type="email" autocomplete="email" required></label>
+      </div>
+      <div id="pickupFields">
+        <label class="co-field">Preferred pickup day (optional)
+          <select id="coPickupDay">
+            <option value="">No preference</option>
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+          </select>
+        </label>
+        <p class="meta">Orders placed Monday–Thursday are ready in 24–48 hours; Friday–Sunday orders are treated as Monday orders.</p>
+      </div>
+    </div>
+
+    <div class="co-section" id="shipFields" style="display:none">
+      <h2>3 — Receiving dealer</h2>
+      <div id="fflPicker">
+        <p>Search for your receiving FFL dealer by ZIP, city, or state, then pick one from the list.</p>
+        <div>
+          <div class="co-row">
+            <label class="co-field">ZIP<input id="fflZip" inputmode="numeric" placeholder="e.g. 30093"></label>
+            <label class="co-field">City<input id="fflCitySearch" placeholder="e.g. Norcross"></label>
+            <label class="co-field">State<input id="fflStateSearch" placeholder="e.g. GA" maxlength="2"></label>
+          </div>
+          <button type="button" class="btn btn-dark" id="fflSearchButton">Search dealers</button>
+        </div>
+        <div id="fflResults"></div>
+        <p id="fflSelected" class="meta"></p>
+        <p class="meta">Or enter your FFL manually below. Name, city, and state are the minimum we need.</p>
+        <div class="co-row">
+          <label class="co-field">FFL dealer name<input id="fflName" placeholder="Dealer name"></label>
+          <label class="co-field">City<input id="fflCityManual" placeholder="City"></label>
+          <label class="co-field">State<input id="fflStateManual" placeholder="GA" maxlength="2"></label>
+          <label class="co-field">ZIP (optional)<input id="fflZipManual" inputmode="numeric" placeholder="ZIP"></label>
+        </div>
+      </div>
+      <div id="shipAddressFields" style="display:none">
+        <p id="noFirearmNote" class="meta"></p>
+        <label class="co-field">Street address<input id="shipStreet" autocomplete="shipping street-address" placeholder="e.g. 123 Main St"></label>
+        <div class="co-row">
+          <label class="co-field">City<input id="shipCity" autocomplete="shipping address-level2"></label>
+          <label class="co-field">State<input id="shipState" autocomplete="shipping address-level1" placeholder="GA" maxlength="2"></label>
+          <label class="co-field">ZIP<input id="shipZip" inputmode="numeric" autocomplete="shipping postal-code" placeholder="ZIP"></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="co-section">
+      <h2>4 — Payment</h2>
+      <p class="meta">Your card details go directly to Authorize.net — they never touch our servers and are never stored on this site.</p>
+      <label class="co-field">Card number<input id="coCardNumber" inputmode="numeric" autocomplete="cc-number" placeholder="1234 5678 9012 3456" required></label>
+      <div class="co-row">
+        <label class="co-field">Expiry (MM/YY)<input id="coExpiry" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY" required></label>
+        <label class="co-field">Security code (CVV)<input id="coCardCode" inputmode="numeric" autocomplete="cc-csc" placeholder="3–4 digits" maxlength="4" required></label>
+        <label class="co-field">Billing ZIP<input id="coBillingZip" inputmode="numeric" autocomplete="billing postal-code" placeholder="ZIP" required></label>
+      </div>
+      <div id="totalsBox" class="co-totals"></div>
+      <div id="payError" class="co-error" style="display:none"></div>
+      <p><button type="submit" id="payButton" class="btn" disabled>Pay — Norcross pickup</button></p>
+      <p class="meta">By paying you agree to the pickup or shipping terms above. Questions? Call <a href="tel:+16786916375">(678) 691-6375</a>, 7 days 10am–6pm EST. Se habla español.</p>
+    </div>
+  </form>
+
+  <div id="confirmation" style="display:none"></div>
   <p>Questions? Call <a href="tel:+16786916375">(678) 691-6375</a>, 7 days 10am–6pm EST. Se habla español.</p>
 </main>
 <footer><div class="wrap"><div class="cols">
-  <div><h4>Shop</h4><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="optics.html">Optics</a><a href="accessories.html">Accessories</a></div>
+  <div><h4>Shop</h4><a href="shop.html">Shop All</a><a href="handguns.html">Handguns</a><a href="rifles.html">Rifles</a><a href="shotguns.html">Shotguns</a><a href="ammunition.html">Ammunition</a><a href="accessories.html">Accessories</a><a href="optics.html">Optics</a></div>
   <div><h4>Help</h4><a href="index.html#help">Help Center</a><a href="buying-guide.html">Buying a Gun Online</a><a href="ffl.html">FFL Dealers &amp; Transfers</a><a href="shipping.html">Shipping &amp; Restrictions</a><a href="returns.html">Returns</a><a href="warranty.html">Warranty</a></div>
   <div><h4>Legal</h4><a href="terms.html">Terms &amp; Conditions</a><a href="privacy.html">Privacy Policy</a><a href="contact.html">Contact Us</a><a href="account.html">My Account</a><a href="cart.html">Cart</a></div>
   <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>7 days a week 10am–6pm EST</span></div>
-  <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><p class="meta">Secure checkout coming soon — payment gateway to be confirmed before launch.</p></div>
+  <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><p class="meta">Secure checkout — card details go directly to Authorize.net and are never stored on this site.</p></div>
 </div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. <a href="credits.html">Photo Credits</a>. Prices are MAP/MSRP.</div></div></footer>
+<script src="assets/app.js?v=20261103c"></script>
+<script src="assets/checkout.js?v=20261118a"></script>
 <div class="callbar"><a href="tel:+16786916375">📞 Call to Order &mdash; (678) 691-6375</a></div>
 </body>
 </html>

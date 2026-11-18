@@ -12,6 +12,14 @@
   to = "/.netlify/functions/ffl-dealers"
   status = 200
 
+# Online checkout (Authorize.net, added 2026-11-18): the charge function
+# also serves the public Accept.js config on GET, so one redirect covers
+# both. Keys come from Netlify env vars (AUTHNET_*), never from this file.
+[[redirects]]
+  from = "/api/authnet-charge"
+  to = "/.netlify/functions/authnet-charge"
+  status = 200
+
 # Importer is a background function, not a page route.
 # It must be triggered on a schedule (see the background importer function).
 # Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.
@@ -56,3 +64,16 @@
 # full-index-*.json keys; it never touches products.json.
 [functions."full-index-build-background"]
   schedule = "0 7 * * *"
+
+# WhatsApp / social link previews (added 2026-11-18): product pages are a
+# static shell — crawlers see only "Product — XL Arms" with no photo, so a
+# link shared on WhatsApp shows the URL plus a blank preview card.
+# netlify/edge-functions/og-preview.js injects per-product Open Graph tags
+# for crawler user-agents only; normal browsers pass through untouched.
+[[edge_functions]]
+  function = "og-preview"
+  path = "/product.html"
+
+[[edge_functions]]
+  function = "og-preview"
+  path = "/product"
