@@ -765,6 +765,7 @@ exports.handler = async (event) => {
       transactionId: String(tr.transId),
       authCode: String(tr.authCode || ''),
       amount: chargeCents / 100,
+      shipping: shippingCents / 100,
       tax: taxCents / 100,
       taxRate,
       fulfillment,

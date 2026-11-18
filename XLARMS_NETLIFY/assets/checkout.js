@@ -433,6 +433,9 @@
       + '<p><strong>Order number:</strong> ' + esc(data.orderId) + '<br>'
       + '<strong>Authorize.net transaction:</strong> ' + esc(data.transactionId) + '<br>'
       + '<strong>Charged today:</strong> ' + money(data.amount) + '</p>'
+      + ((!isPickup && typeof data.shipping === 'number')
+        ? '<p><strong>Shipping:</strong> ' + money(data.shipping) + '</p>'
+        : '')
       + ((data.tax > 0)
         ? '<p><strong>Sales tax (Georgia' + (data.taxRate ? ' ' + fmtPct(data.taxRate) + '%' : '') + '):</strong> ' + money(data.tax) + (isPickup ? ' — included in your balance due at pickup.' : ' — included in the amount charged today.') + '</p>'
         : '')
