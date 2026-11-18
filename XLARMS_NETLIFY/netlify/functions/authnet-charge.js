@@ -375,20 +375,37 @@ exports.handler = async (event) => {
   };
 
   let ctr;
+  let gatewayError = null;
   try {
     const res = await fetch(apiUrl(m), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { /* non-JSON reply */ }
     ctr = data && data.createTransactionResponse;
+    // Authorize.net returns some gateway-level errors (e.g. E00007
+    // authentication failure) in a flat format with no
+    // createTransactionResponse wrapper — surface the real reason instead
+    // of the generic "did not answer" message.
+    if (!ctr && data && data.messages && Array.isArray(data.messages.message) && data.messages.message[0]) {
+      const em = data.messages.message[0];
+      gatewayError = (em.text || em.code || '').toString();
+    }
+    if (!ctr && !data) {
+      console.error('authnet-charge: non-JSON reply from Authorize.net, HTTP', res.status, String(text).slice(0, 200));
+    }
   } catch (e) {
     console.error('authnet-charge: Authorize.net request failed:', e && e.message);
     return fail(502, `The payment system did not answer. Nothing was charged. Please try again or call ${PHONE}.`);
   }
   if (!ctr) {
-    console.error('authnet-charge: no createTransactionResponse from Authorize.net');
+    console.error('authnet-charge: no createTransactionResponse from Authorize.net', gatewayError || '');
+    if (gatewayError) {
+      return fail(400, gatewayError + ' Nothing was charged. Please try again or call ' + PHONE + '.');
+    }
     return fail(502, `The payment system did not answer. Nothing was charged. Please try again or call ${PHONE}.`);
   }
 
