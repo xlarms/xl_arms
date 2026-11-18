@@ -59,12 +59,22 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 // --- Money: single source of truth for what an order costs. ---
 // PICKUP_FEE_CENTS: the $15.00 background-check service fee — the ONLY
-// money taken online for a Norcross pickup order.
+// money taken online for a Norcross pickup order. Pickup itself is FREE
+// (no shipping charge).
 const PICKUP_FEE_CENTS = 1500;
-// TODO (Jonathan): set the flat-rate shipping charge for ship-to-FFL orders.
-// Until this is set, ship-to-FFL orders are charged the items total only
-// ($0 shipping). Do NOT invent a price here — Jonathan sets this number.
-const SHIPPING_FLAT_RATE_CENTS = 0;
+// Shipping for ship-to-FFL orders, by destination state (Jonathan,
+// 2026-11-18): $20.00 within Georgia, $45.00 out of Georgia. The cost
+// behind them is two legs — RSR to XL ($25, 2-day) then XL to the
+// customer's FFL ($15 pistol / $20 long gun) — so $45 covers the full
+// out-of-state cost and $20 is the in-Georgia customer rate. Env vars
+// override the defaults; the old SHIPPING_FLAT_RATE_CENTS is NOT read
+// (it is 0 in Netlify and would zero the rates).
+function envCents(name, fallback) {
+  const v = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+const SHIPPING_FLAT_RATE_GA_CENTS = envCents('SHIPPING_FLAT_RATE_GA_CENTS', 2000);
+const SHIPPING_FLAT_RATE_OUT_OF_STATE_CENTS = envCents('SHIPPING_FLAT_RATE_OUT_OF_STATE_CENTS', 4500);
 
 // --- Georgia sales tax (destination-based; out of state = 0%). ---
 // Georgia's combined rate is 4% state + 2-5% local, 6% to 9% by
@@ -76,9 +86,9 @@ const SHIPPING_FLAT_RATE_CENTS = 0;
 // of a ZIP's population: Atlanta 8.9%, Hapeville 8.75%, East Point 8.75%,
 // College Park 8.75% (Fulton part) / 9% (Clayton part). DOR rates change
 // quarterly - re-check the chart each quarter and update this table.
-// Tax applies to the ITEMS total only. NOTE: shipping is $0 today; if a
-// shipping rate is ever set, confirm whether the shipping charge itself
-// is taxable in Georgia before adding it to the taxable base.
+// Tax base: for a Georgia ship order, ITEMS + SHIPPING (Georgia taxes
+// delivery charges on a taxable sale — GA DOR rule 560-12-2-.45, even
+// when separately stated); pickup tax is on the items total only.
 const GA_TAX_RATES = {
   "30002":8, "30003":6, "30004":7.75, "30005":7.75, "30006":6, "30007":6, "30008":6, "30009":7.75,
   "30010":6, "30011":8, "30012":7, "30013":7, "30014":7, "30015":7, "30016":7, "30017":6,
@@ -421,7 +431,8 @@ exports.handler = async (event) => {
       apiLoginID: process.env.AUTHNET_API_LOGIN_ID || '',
       clientKey: process.env.AUTHNET_CLIENT_KEY || '',
       acceptJsUrl: acceptJsUrl(m),
-      shippingFlatRate: SHIPPING_FLAT_RATE_CENTS / 100,
+      shippingFlatRateGA: SHIPPING_FLAT_RATE_GA_CENTS / 100,
+      shippingFlatRateOutOfState: SHIPPING_FLAT_RATE_OUT_OF_STATE_CENTS / 100,
       pickupFee: PICKUP_FEE_CENTS / 100,
       configured,
     });
@@ -517,28 +528,36 @@ exports.handler = async (event) => {
     }
   }
 
+  // --- Shipping (destination-based; pickup is free). ---
+  // Ship within Georgia: $20. Ship out of Georgia: $45. (Jonathan,
+  // 2026-11-18.) Destination state is the receiving FFL's state for a
+  // firearm order, or the shipping-address state otherwise.
+  let shippingCents = 0;
+  let destState = null;
+  if (fulfillment === 'ship') {
+    destState = hasFirearm ? (ffl && ffl.state) : (shippingAddress && shippingAddress.state);
+    shippingCents = destState === 'GA' ? SHIPPING_FLAT_RATE_GA_CENTS : SHIPPING_FLAT_RATE_OUT_OF_STATE_CENTS;
+  }
+
   // --- Georgia sales tax (destination-based; out of state = 0%). ---
   // Pickup is always Norcross (Gwinnett County, 6%). Ship uses the
   // destination ZIP: the receiving FFL's ZIP for a firearm order, the
-  // shipping-address ZIP otherwise. Tax is on the ITEMS total only.
-  // NOTE: shipping is $0 today. If a shipping rate is ever set, confirm
-  // whether the shipping charge itself is taxable in Georgia before
-  // adding it to the taxable base.
+  // shipping-address ZIP otherwise. Georgia taxes delivery charges when
+  // the sale is taxable (GA DOR rule 560-12-2-.45 — a separately stated
+  // shipping charge is still taxable), so for a Georgia ship order the
+  // tax base is ITEMS + SHIPPING; pickup tax is on items only.
   let taxRate = 0;
   if (fulfillment === 'pickup') {
     taxRate = 0.06; // Norcross pickup — Gwinnett County, DOR chart Oct 1 2026
-  } else if (fulfillment === 'ship') {
-    const destState = hasFirearm ? (ffl && ffl.state) : (shippingAddress && shippingAddress.state);
-    if (destState === 'GA') {
-      const destZip = hasFirearm ? (ffl && ffl.zip) : (shippingAddress && shippingAddress.zip);
-      taxRate = georgiaTaxRate(destZip);
-    }
+  } else if (fulfillment === 'ship' && destState === 'GA') {
+    const destZip = hasFirearm ? (ffl && ffl.zip) : (shippingAddress && shippingAddress.zip);
+    taxRate = georgiaTaxRate(destZip);
   }
-  const taxCents = Math.round(itemsCents * taxRate);
+  const taxableCents = fulfillment === 'ship' && destState === 'GA' ? itemsCents + shippingCents : itemsCents;
+  const taxCents = Math.round(taxableCents * taxRate);
 
   // --- Amount: pickup = $15 fee only (tax goes into the balance due at
   // pickup); ship = items + shipping + tax, charged online. ---
-  const shippingCents = fulfillment === 'ship' ? SHIPPING_FLAT_RATE_CENTS : 0;
   const chargeCents = fulfillment === 'pickup' ? PICKUP_FEE_CENTS : itemsCents + shippingCents + taxCents;
   const balanceDueCents = fulfillment === 'pickup' ? Math.max(0, itemsCents - PICKUP_FEE_CENTS + taxCents) : 0;
   if (!(chargeCents > 0)) {

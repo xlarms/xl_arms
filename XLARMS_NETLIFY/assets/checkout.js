@@ -10,12 +10,14 @@
 // computes.
 //
 // Money model: pickup = $15.00 service fee only, balance at pickup (after
-// the $15 credit) including Georgia sales tax (Norcross 6%). Ship to FFL =
-// items total + flat-rate shipping + Georgia sales tax at the destination
-// rate (out of state = 0%). The server recomputes tax on every charge —
-// the page only DISPLAYS it, via GET /api/authnet-charge?taxZip=...&
-// taxState=... (see updateTax). If that lookup fails, the tax row shows
-// "calculated at checkout" and checkout is never blocked on it.
+// the $15 credit) including Georgia sales tax (Norcross 6%); pickup
+// itself is free. Ship to FFL = items total + shipping ($20 within
+// Georgia, $45 out of Georgia) + Georgia sales tax at the destination
+// rate (out of state = 0%), where Georgia tax is on items + shipping.
+// The server recomputes tax and shipping on every charge — the page only
+// DISPLAYS them, via GET /api/authnet-charge?taxZip=...&taxState=...
+// (see updateTax). If that lookup fails, the tax row shows "calculated
+// at checkout" and checkout is never blocked on it.
 //
 // Depends on assets/app.js (getCart, money, esc) — checkout.html loads
 // app.js first. If the config endpoint says checkout is not configured,
@@ -23,7 +25,7 @@
 
 (function () {
   var PHONE = '(678) 691-6375';
-  var config = null;          // { mode, apiLoginID, clientKey, acceptJsUrl, shippingFlatRate, pickupFee, configured }
+  var config = null;          // { mode, apiLoginID, clientKey, acceptJsUrl, shippingFlatRateGA, shippingFlatRateOutOfState, pickupFee, configured }
   var acceptReady = false;    // Accept.js script loaded
   var fulfillment = 'pickup'; // 'pickup' | 'ship'
   var selectedFFL = null;     // { name, street, city, state, zip } from the dealer search
@@ -41,8 +43,17 @@
   function itemsCents() {
     return cart().reduce(function (a, i) { return a + Math.round(Number(i.price || 0) * 100) * (i.qty || 1); }, 0);
   }
+  // Shipping (DISPLAY only — the server recomputes it on every charge).
+  // $20 within Georgia, $45 out of Georgia (Jonathan, 2026-11-18), by
+  // the same destination as the tax lookup. Returns 0 when no destination
+  // is set yet — renderTotals shows a "select a destination" message
+  // then, never a $0.00 shipping line.
   function shipCents() {
-    return (config && typeof config.shippingFlatRate === 'number') ? Math.round(config.shippingFlatRate * 100) : 0;
+    if (!config || fulfillment === 'pickup') return 0;
+    var dest = destForTax();
+    if (!dest) return 0;
+    var rate = dest.state === 'GA' ? config.shippingFlatRateGA : config.shippingFlatRateOutOfState;
+    return (typeof rate === 'number') ? Math.round(rate * 100) : 0;
   }
   function pickupFeeCents() {
     return (config && typeof config.pickupFee === 'number') ? Math.round(config.pickupFee * 100) : 1500;
@@ -57,7 +68,16 @@
   var taxLookupSeq = 0;
   function fmtPct(r) { return String(Math.round(Number(r || 0) * 10000) / 100); }
   function taxCents() {
-    return taxKnown ? Math.round(itemsCents() * taxRate) : 0;
+    // Georgia taxes delivery charges on a taxable sale, so a Georgia ship
+    // order is taxed on items + shipping; pickup (items only) and
+    // out-of-state (0%) are unchanged.
+    if (!taxKnown) return 0;
+    var base = itemsCents();
+    if (fulfillment === 'ship') {
+      var dest = destForTax();
+      if (dest && dest.state === 'GA') base += shipCents();
+    }
+    return Math.round(base * taxRate);
   }
   // What the customer is charged today, in cents.
   function chargeCents() {
@@ -144,25 +164,29 @@
         + '<p>Balance due at pickup: <strong>' + money(balanceDueCents() / 100) + (taxKnown ? '' : ' + tax') + '</strong> — your $15 is credited toward the price.</p>'
         + '<p class="meta">You pay only the $15 online. The balance is paid at pickup, after you pass the background check.</p>';
     } else {
-      var ship = shipCents();
-      var shipNote = ship === 0
-        ? ' <span class="meta">(No flat shipping rate set yet — we will call you about shipping before your order ships.)</span>'
-        : '';
       var dest = destForTax();
+      var ship = shipCents();
+      var shipKnown = !!dest;
+      var shipRow;
+      if (!shipKnown) {
+        shipRow = '<p>Shipping: <span class="meta">Select a receiving FFL (or enter your shipping address) to see shipping.</span></p>';
+      } else {
+        shipRow = '<p>Shipping: <strong>' + money(ship / 100) + '</strong></p>';
+      }
       var shipTaxRow;
       if (!dest) {
         shipTaxRow = '<p>Sales tax: <span class="meta">Select a receiving FFL (or enter your shipping address) to see the Georgia sales tax for your delivery.</span></p>';
       } else if (!taxKnown) {
-        shipTaxRow = '<p>Sales tax: <strong>calculated at checkout</strong> <span class="meta">(Georgia tax on the items total, at your delivery rate.)</span></p>';
+        shipTaxRow = '<p>Sales tax: <strong>calculated at checkout</strong> <span class="meta">(Georgia tax on items + shipping, at your delivery rate.)</span></p>';
       } else if (taxRate === 0) {
         shipTaxRow = '<p>Sales tax: <strong>$0.00</strong> <span class="meta">(No sales tax — your delivery is outside Georgia.)</span></p>';
       } else {
         shipTaxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong></p>';
       }
       t.innerHTML = '<p>Items total: <strong>' + money(itemsCents() / 100) + '</strong></p>'
-        + '<p>Shipping: <strong>' + money(ship / 100) + '</strong>' + shipNote + '</p>'
+        + shipRow
         + shipTaxRow
-        + '<p>Due today: <strong>' + money(chargeCents() / 100) + (taxKnown ? '' : ' + tax') + '</strong></p>';
+        + '<p>Due today: <strong>' + money(chargeCents() / 100) + (shipKnown ? '' : ' + shipping') + (taxKnown ? '' : ' + tax') + '</strong></p>';
     }
     var btn = $('payButton');
     if (btn) {
