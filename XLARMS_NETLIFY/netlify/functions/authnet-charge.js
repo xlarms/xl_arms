@@ -365,8 +365,12 @@ exports.handler = async (event) => {
             : 'XL Arms online order — Ship to FFL',
         },
         ...(lineItems ? { lineItems } : {}),
-        billTo: { firstName, lastName, zip: billingZip },
+        // NOTE: key order matters — Authorize.net converts this JSON to XML
+        // and validates the element sequence strictly. The schema requires
+        // `customer` BEFORE `billTo` inside transactionRequest; the reverse
+        // order is rejected with a schema error (found live 2026-11-18).
         customer: { email },
+        billTo: { firstName, lastName, zip: billingZip },
         transactionSettings: {
           setting: [{ settingName: 'duplicateWindow', settingValue: '120' }],
         },
