@@ -10,8 +10,12 @@
 // computes.
 //
 // Money model: pickup = $15.00 service fee only, balance at pickup (after
-// the $15 credit). Ship to FFL = items total + flat-rate shipping.
-// No sales tax is charged online.
+// the $15 credit) including Georgia sales tax (Norcross 6%). Ship to FFL =
+// items total + flat-rate shipping + Georgia sales tax at the destination
+// rate (out of state = 0%). The server recomputes tax on every charge —
+// the page only DISPLAYS it, via GET /api/authnet-charge?taxZip=...&
+// taxState=... (see updateTax). If that lookup fails, the tax row shows
+// "calculated at checkout" and checkout is never blocked on it.
 //
 // Depends on assets/app.js (getCart, money, esc) — checkout.html loads
 // app.js first. If the config endpoint says checkout is not configured,
@@ -43,12 +47,67 @@
   function pickupFeeCents() {
     return (config && typeof config.pickupFee === 'number') ? Math.round(config.pickupFee * 100) : 1500;
   }
+  // Sales tax (DISPLAY only — the server recomputes it on every charge).
+  // taxRate is the decimal rate for the current destination; taxKnown is
+  // false until the lookup succeeds (or the destination is known to have
+  // no tax, i.e. out of state). taxLookupSeq guards against out-of-order
+  // lookup replies when the destination changes quickly.
+  var taxRate = 0;
+  var taxKnown = false;
+  var taxLookupSeq = 0;
+  function fmtPct(r) { return String(Math.round(Number(r || 0) * 10000) / 100); }
+  function taxCents() {
+    return taxKnown ? Math.round(itemsCents() * taxRate) : 0;
+  }
   // What the customer is charged today, in cents.
   function chargeCents() {
-    return fulfillment === 'pickup' ? pickupFeeCents() : itemsCents() + shipCents();
+    return fulfillment === 'pickup' ? pickupFeeCents() : itemsCents() + shipCents() + taxCents();
   }
   function balanceDueCents() {
-    return fulfillment === 'pickup' ? Math.max(0, itemsCents() - pickupFeeCents()) : 0;
+    return fulfillment === 'pickup' ? Math.max(0, itemsCents() - pickupFeeCents() + taxCents()) : 0;
+  }
+  // Current destination for sales tax: pickup is always Norcross; ship
+  // uses the receiving FFL (firearm) or the shipping address (no firearm).
+  // Returns { state, zip } or null when no destination is set yet.
+  function destForTax() {
+    if (fulfillment === 'pickup') return { state: 'GA', zip: '30093' };
+    if (hasFirearm()) {
+      var f = chosenFFL();
+      return (f && f.state) ? { state: f.state, zip: f.zip || '' } : null;
+    }
+    var st = val('shipState');
+    return st ? { state: st, zip: val('shipZip') } : null;
+  }
+  // Look up the Georgia sales-tax rate for the current destination and
+  // re-render the totals. Never blocks checkout: on any failure the tax
+  // row shows "calculated at checkout" and the server still computes the
+  // real tax when the order is charged.
+  function updateTax() {
+    var seq = ++taxLookupSeq;
+    var dest = destForTax();
+    if (!dest) {
+      // Ship order with no destination yet — nothing to look up.
+      taxRate = 0; taxKnown = false;
+      renderTotals();
+      return;
+    }
+    var params = new URLSearchParams();
+    params.set('taxState', dest.state);
+    if (dest.zip) params.set('taxZip', dest.zip);
+    fetch('/api/authnet-charge?' + params.toString())
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (seq !== taxLookupSeq) return; // superseded by a newer lookup
+        if (!d || !d.ok) { taxRate = 0; taxKnown = false; }
+        else if (!d.taxable) { taxRate = 0; taxKnown = true; } // out of state — no tax
+        else { taxRate = Number(d.rate) || 0; taxKnown = !!d.known; }
+        renderTotals();
+      })
+      .catch(function () {
+        if (seq !== taxLookupSeq) return;
+        taxRate = 0; taxKnown = false;
+        renderTotals();
+      });
   }
 
   function renderSummary() {
@@ -73,18 +132,37 @@
     var t = $('totalsBox');
     if (!t) return;
     if (fulfillment === 'pickup') {
+      var taxRow;
+      if (!taxKnown) {
+        taxRow = '<p>Sales tax: <strong>calculated at pickup</strong> <span class="meta">(Georgia tax on the items total — 6% in Norcross.)</span></p>';
+      } else {
+        taxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong> <span class="meta">— included in your balance due at pickup.</span></p>';
+      }
       t.innerHTML = '<p>Items total: <strong>' + money(itemsCents() / 100) + '</strong></p>'
         + '<p>Due today (background-check service fee): <strong>' + money(pickupFeeCents() / 100) + '</strong></p>'
-        + '<p>Balance due at pickup: <strong>' + money(balanceDueCents() / 100) + '</strong> — your $15 is credited toward the price.</p>'
+        + taxRow
+        + '<p>Balance due at pickup: <strong>' + money(balanceDueCents() / 100) + (taxKnown ? '' : ' + tax') + '</strong> — your $15 is credited toward the price.</p>'
         + '<p class="meta">You pay only the $15 online. The balance is paid at pickup, after you pass the background check.</p>';
     } else {
       var ship = shipCents();
       var shipNote = ship === 0
         ? ' <span class="meta">(No flat shipping rate set yet — we will call you about shipping before your order ships.)</span>'
         : '';
+      var dest = destForTax();
+      var shipTaxRow;
+      if (!dest) {
+        shipTaxRow = '<p>Sales tax: <span class="meta">Select a receiving FFL (or enter your shipping address) to see the Georgia sales tax for your delivery.</span></p>';
+      } else if (!taxKnown) {
+        shipTaxRow = '<p>Sales tax: <strong>calculated at checkout</strong> <span class="meta">(Georgia tax on the items total, at your delivery rate.)</span></p>';
+      } else if (taxRate === 0) {
+        shipTaxRow = '<p>Sales tax: <strong>$0.00</strong> <span class="meta">(No sales tax — your delivery is outside Georgia.)</span></p>';
+      } else {
+        shipTaxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong></p>';
+      }
       t.innerHTML = '<p>Items total: <strong>' + money(itemsCents() / 100) + '</strong></p>'
         + '<p>Shipping: <strong>' + money(ship / 100) + '</strong>' + shipNote + '</p>'
-        + '<p>Due today: <strong>' + money(chargeCents() / 100) + '</strong></p>';
+        + shipTaxRow
+        + '<p>Due today: <strong>' + money(chargeCents() / 100) + (taxKnown ? '' : ' + tax') + '</strong></p>';
     }
     var btn = $('payButton');
     if (btn) {
@@ -114,6 +192,7 @@
       ? 'Your order has no firearms, so it ships to your address — no FFL needed.'
       : '';
     renderTotals();
+    updateTax(); // refresh the sales-tax rate for the new destination
     setPayEnabled(!!config && !!config.configured && acceptReady);
   }
 
@@ -154,10 +233,11 @@
     var sel = $('fflSelected');
     if (sel) sel.innerHTML = '<strong>Receiving FFL:</strong> ' + esc(d.name) + ' — ' + esc([d.street, d.city, d.state, d.zip].filter(Boolean).join(', ')) + ' <button type="button" class="btn btn-dark" id="fflClear">Change</button>';
     var clear = $('fflClear');
-    if (clear) clear.addEventListener('click', function () { selectedFFL = null; if (sel) sel.innerHTML = ''; });
+    if (clear) clear.addEventListener('click', function () { selectedFFL = null; if (sel) sel.innerHTML = ''; updateTax(); });
     // Keep the manual fields in sync so the server sees the same dealer.
     var set = function (id, v) { var el = $(id); if (el) el.value = v || ''; };
     set('fflName', d.name); set('fflCityManual', d.city); set('fflStateManual', d.state); set('fflZipManual', d.zip);
+    updateTax(); // the destination (and its tax rate) just changed
   }
   function chosenFFL() {
     if (selectedFFL) return selectedFFL;
@@ -329,6 +409,9 @@
       + '<p><strong>Order number:</strong> ' + esc(data.orderId) + '<br>'
       + '<strong>Authorize.net transaction:</strong> ' + esc(data.transactionId) + '<br>'
       + '<strong>Charged today:</strong> ' + money(data.amount) + '</p>'
+      + ((data.tax > 0)
+        ? '<p><strong>Sales tax (Georgia' + (data.taxRate ? ' ' + fmtPct(data.taxRate) + '%' : '') + '):</strong> ' + money(data.tax) + (isPickup ? ' — included in your balance due at pickup.' : ' — included in the amount charged today.') + '</p>'
+        : '')
       + (isPickup
         ? '<p><strong>Balance due at pickup:</strong> ' + money(data.balanceDueAtPickup || 0) + ' (your $15 is credited toward the price).</p>'
           + '<p><strong>Next step — send your pickup information:</strong> use the pickup intake page so we can run the background check before you come in. Bring your original Georgia ID/license and sign the official Form 4473 in person at pickup.</p>'
@@ -360,6 +443,11 @@
     if (rShip) rShip.addEventListener('change', function () { if (rShip.checked) setFulfillment('ship'); });
     var fflBtn = $('fflSearchButton');
     if (fflBtn) fflBtn.addEventListener('click', searchFFL);
+    // Re-look up sales tax when the ship destination changes by hand.
+    ['shipState', 'shipZip', 'fflStateManual', 'fflZipManual'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener('change', function () { if (fulfillment === 'ship') updateTax(); });
+    });
     var cardEl = $('coCardNumber');
     if (cardEl) cardEl.addEventListener('input', function () { formatCardNumber(cardEl); });
     var expEl = $('coExpiry');
