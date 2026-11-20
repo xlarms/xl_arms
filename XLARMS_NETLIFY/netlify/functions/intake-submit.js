@@ -37,7 +37,10 @@
 
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+
+const ORDERS_PREFIX = 'orders-private';
+const ORDER_ID_RE = /^ORD-\d{8}-[0-9a-f]{6}$/i;
 
 const PREFIX = 'intake-private';
 const PHONE = '(678) 691-6375';
@@ -65,6 +68,78 @@ function wasabiClient() {
     }),
     bucket: process.env.WASABI_BUCKET,
   };
+}
+
+// --- Paid $15 pickup-fee check (Jonathan, 2026-11-20). ---
+// The intake must link to a paid pickup order. Online customers already
+// paid the $15 at checkout; phone-order customers pay it on this page
+// (intake-charge) before their intake is accepted. A 'test' order (test
+// mode, transId 0, no money moved) never counts as paid.
+// Returns the paid order ID, or null.
+function normPhone(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  return d.length > 10 ? d.slice(-10) : d;
+}
+function isPaidPickupOrder(rec) {
+  if (!rec || typeof rec !== 'object') return false;
+  if (rec.fulfillment !== 'pickup') return false;
+  if (rec.status !== 'paid') return false;
+  if (!(Number(rec.amountCharged) >= 15)) return false;
+  const tid = rec.transaction && String(rec.transaction.transId || '');
+  if (!tid || tid === '0') return false;
+  return true;
+}
+async function getOrderRecord(client, bucket, orderId) {
+  try {
+    const out = await client.send(new GetObjectCommand({
+      Bucket: bucket, Key: `${ORDERS_PREFIX}/${orderId}/record.json`,
+    }));
+    const text = await out.Body.transformToString();
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+}
+async function findPaidPickupOrder(orderRef, phone) {
+  if (!process.env.WASABI_BUCKET || !process.env.WASABI_KEY || !process.env.WASABI_SECRET) return null;
+  const { client, bucket } = wasabiClient();
+  const ref = String(orderRef || '').trim();
+  // 1) Direct order-ID lookup (fast, exact) — the normal path, since the
+  // confirmation page pre-fills the order number into the intake link.
+  if (ORDER_ID_RE.test(ref)) {
+    const rec = await getOrderRecord(client, bucket, ref.toUpperCase());
+    if (isPaidPickupOrder(rec)) return rec.id;
+    return null;
+  }
+  // 2) Phone fallback: the customer entered a phone number instead of an
+  // order number. Scan the most recent pickup order records for this
+  // phone. Bounded (50 records, most recent first, fetched in parallel)
+  // so a large order history cannot slow the intake down.
+  const want = normPhone(phone || ref);
+  if (want.length < 10) return null;
+  try {
+    const listed = await client.send(new ListObjectsV2Command({
+      Bucket: bucket, Prefix: ORDERS_PREFIX + '/', MaxKeys: 1000,
+    }));
+    const keys = (listed.Contents || [])
+      .map((o) => o.Key)
+      .filter((k) => /\/record\.json$/.test(k))
+      .sort()
+      .reverse(); // most recent order IDs first (ORD-YYYYMMDD-...)
+    for (let i = 0; i < keys.length; i += 10) {
+      const batch = keys.slice(i, i + 10);
+      if (i >= 50) break;
+      const recs = await Promise.all(batch.map((key) => getOrderRecord(client, bucket, key.split('/')[1])));
+      for (const rec of recs) {
+        if (rec && isPaidPickupOrder(rec) && normPhone(rec.customer && rec.customer.phone) === want) {
+          return rec.id;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('intake-submit: paid-order phone scan failed:', e && e.message);
+  }
+  return null;
 }
 
 function json(statusCode, body) {
@@ -200,6 +275,22 @@ exports.handler = async (event) => {
       return fail(e.message + ' Please try again or call ' + PHONE + '.');
     }
 
+    // --- Paid $15 pickup-fee check (Jonathan, 2026-11-20): the intake
+    // must link to a paid pickup order. Online customers already paid at
+    // checkout; phone-order customers pay the $15 on this page
+    // (intake-charge) before their intake is accepted. If no paid order
+    // is found, do NOT store the intake — return needsPayment so the page
+    // shows the $15 payment step instead.
+    const paidOrderId = await findPaidPickupOrder(orderRef, phone);
+    if (!paidOrderId) {
+      return json(402, {
+        ok: false,
+        needsPayment: true,
+        error: 'We could not find a paid $15 pickup fee for this order. Please pay the $15 background-check service fee below, then your pickup information will be sent.',
+        phone: PHONE,
+      });
+    }
+
     const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
     const submittedAt = new Date().toISOString();
     const files = [`id-front.${front.ext}`];
@@ -216,6 +307,7 @@ exports.handler = async (event) => {
       email,
       product,
       orderRef,
+      paidOrderId,
       pickupDay,
       preSignature,
       form4473: f4473,
@@ -243,7 +335,7 @@ exports.handler = async (event) => {
     await Promise.all(uploads);
 
     // Private staff alert in the function log only — name + order ref, NO ID image.
-    console.log(`New pickup intake for ${fullName}, order ref: ${orderRef || '(none)'}, pickup day: ${pickupDay || '(none)'}, id: ${id}`);
+    console.log(`New pickup intake for ${fullName}, order ref: ${orderRef || '(none)'}, paid order: ${paidOrderId}, pickup day: ${pickupDay || '(none)'}, id: ${id}`);
     // Email alert to staff (best-effort: a failed email must NEVER fail the
     // submission — the intake is already safely stored above). Sends from
     // storage@xlarms.us via HostGator SMTP to info@xlarms.us. The email
@@ -264,7 +356,7 @@ exports.handler = async (event) => {
           from: ALERT_FROM,
           to: ALERT_TO,
           subject: `New pickup intake: ${fullName} — ${orderRef || 'no order ref'}`,
-          text: `New pickup intake received.\n\nName: ${fullName}\nProduct: ${product}\nOrder ref: ${orderRef || '(none)'}\nPickup day: ${pickupDay || '(none)'}\nSubmission id: ${id}\n\nOpen the submission here:\n${staffLink}\n\nOpen the link, type the staff secret code, and the submission opens. Do not reply to this email with ID photos.`,
+          text: `New pickup intake received.\n\nName: ${fullName}\nProduct: ${product}\nOrder ref: ${orderRef || '(none)'}\nPaid order: ${paidOrderId}\nPickup day: ${pickupDay || '(none)'}\nSubmission id: ${id}\n\nOpen the submission here:\n${staffLink}\n\nOpen the link, type the staff secret code, and the submission opens. Do not reply to this email with ID photos.`,
         });
       } catch (e) {
         console.error('intake-submit: alert email failed (submission already stored):', e && e.message);

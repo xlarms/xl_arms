@@ -20,6 +20,15 @@
   to = "/.netlify/functions/authnet-charge"
   status = 200
 
+# Pickup-intake $15 fee (added 2026-11-20): charges the background-check
+# service fee for a customer who reached the intake form with no paid
+# pickup order on file (phone order, or a direct link). See
+# netlify/functions/intake-charge.js.
+[[redirects]]
+  from = "/api/intake-charge"
+  to = "/.netlify/functions/intake-charge"
+  status = 200
+
 # Importer is a background function, not a page route.
 # It must be triggered on a schedule (see the background importer function).
 # Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.

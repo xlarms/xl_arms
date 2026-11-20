@@ -442,7 +442,7 @@
       + (isPickup
         ? '<p><strong>Balance due at pickup:</strong> ' + money(data.balanceDueAtPickup || 0) + ' (your $15 is credited toward the price).</p>'
           + '<p><strong>Next step — send your pickup information:</strong> use the pickup intake page so we can run the background check before you come in. Bring your original Georgia ID/license and sign the official Form 4473 in person at pickup.</p>'
-          + '<p><a class="btn" href="pickup-intake.html">Send your pickup information →</a></p>'
+          + '<p><a class="btn" href="pickup-intake.html?order=' + encodeURIComponent(data.orderId) + '">Send your pickup information →</a></p>'
         : '<p>Your order will ship to your receiving FFL. The FFL will run the background check and Form 4473 at their counter before you take possession. We will call you if anything is needed before shipping.</p>')
       + '<p class="meta">A confirmation email is on its way to the email address you gave. Questions? Call <a href="tel:+16786916375">(678) 691-6375</a>, 7 days 10am–6pm EST.</p>'
       + '<p><a class="btn btn-dark" href="shop.html">Continue shopping →</a></p>';
