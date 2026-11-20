@@ -1,0 +1,88 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/products"
+  to = "/.netlify/functions/get-products"
+  status = 200
+
+[[redirects]]
+  from = "/api/ffl-dealers"
+  to = "/.netlify/functions/ffl-dealers"
+  status = 200
+
+# Online checkout (Authorize.net, added 2026-11-18): the charge function
+# also serves the public Accept.js config on GET, so one redirect covers
+# both. Keys come from Netlify env vars (AUTHNET_*), never from this file.
+[[redirects]]
+  from = "/api/authnet-charge"
+  to = "/.netlify/functions/authnet-charge"
+  status = 200
+
+# Pickup-intake $15 fee (added 2026-11-20): charges the background-check
+# service fee for a customer who reached the intake form with no paid
+# pickup order on file (phone order, or a direct link). See
+# netlify/functions/intake-charge.js.
+[[redirects]]
+  from = "/api/intake-charge"
+  to = "/.netlify/functions/intake-charge"
+  status = 200
+
+# Importer is a background function, not a page route.
+# It must be triggered on a schedule (see the background importer function).
+# Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.
+
+# Fully automatic image backfill: the scheduler wakes on its own timer
+# and triggers one backfill job per wake (see netlify/functions/backfill-scheduler.js).
+# Schedules run in UTC and only on published deploys.
+[functions."backfill-scheduler"]
+  schedule = "*/30 * * * *"
+
+# Gap-fill auto-queue (Jonathan, 2026-11-02): in-stock missing photos only,
+# standard first, hi second, one batch per wake. See
+# netlify/functions/gapfill-scheduler.js. Pause with GAPFILL_AUTO_PAUSED=1.
+[functions."gapfill-scheduler"]
+  schedule = "*/30 * * * *"
+
+# Pickup-intake retention cleanup (Jonathan, 2026-11-05): deletes a
+# submission's ID photo + record 30 days after pickup, or 30 days after
+# submission if never picked up. See netlify/functions/intake-cleanup.js.
+# Only ever deletes objects under the private intake-private/ prefix.
+[functions."intake-cleanup"]
+  schedule = "0 9 * * *"
+
+# Daily RSR catalog import (added 2026-11-17 — the catalog had not been
+# updated since 2026-11-03 because this function had no schedule; the shop
+# was serving two-week-old prices/stock). Runs 6 AM UTC daily. The importer
+# downloads the latest RSR inventory, validates, and publishes atomically
+# to the Blobs store; a failed run keeps the previous catalog.
+# HONEST LIMIT: a scheduled Blobs import alone does NOT refresh the static
+# data/full-index-*.json files that product pages read first, nor the
+# bundled catalog-index or featured-pools.json — those still need a
+# re-export + deploy after each import (see the regeneration rule in the
+# project notes). The schedule keeps the API/list data fresh; the static
+# files lag until re-exported.
+[functions."rsr-import-background"]
+  schedule = "0 6 * * *"
+
+# Daily full-index rebuild (added 2026-11-17, runs 7 AM UTC — one hour
+# after the import). The SKU API reads the Blobs per-letter chunks, so
+# the chunks must be rebuilt after each daily import or the API keeps
+# returning the previous day's stock. This builder only writes
+# full-index-*.json keys; it never touches products.json.
+[functions."full-index-build-background"]
+  schedule = "0 7 * * *"
+
+# WhatsApp / social link previews (added 2026-11-18): product pages are a
+# static shell — crawlers see only "Product — XL Arms" with no photo, so a
+# link shared on WhatsApp shows the URL plus a blank preview card.
+# netlify/edge-functions/og-preview.js injects per-product Open Graph tags
+# for crawler user-agents only; normal browsers pass through untouched.
+[[edge_functions]]
+  function = "og-preview"
+  path = "/product.html"
+
+[[edge_functions]]
+  function = "og-preview"
+  path = "/product"
