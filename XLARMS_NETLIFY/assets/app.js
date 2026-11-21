@@ -694,7 +694,7 @@ async function initProduct() {
   } catch (e) { /* SEO enhancement only */ }
   const stock = pgStockHtml(p);
   const ffl = p.is_firearm
-    ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout. Payment gateway to be confirmed before launch — do not use this starter page for real checkout.</div>`
+    ? `<div class="ffl"><strong>FFL transfer required.</strong> Firearms ship to a licensed dealer (FFL) of your choice for background check and pickup — not directly to your home. You will confirm your FFL during checkout.</div>`
     : `<div class="ffl"><strong>Ships normally.</strong> Ammunition and accessories do not require an FFL transfer, but state shipping restrictions still apply at checkout.</div>`;
   el.innerHTML = `
     <p><a href="index.html">← Back to shop</a></p>
