@@ -29,6 +29,15 @@
   to = "/.netlify/functions/intake-charge"
   status = 200
 
+# Points/rewards (added 2026-11-21): account holders earn 1 point per $1
+# of items total and redeem 100 points = $5 off on ship-to-FFL orders.
+# GET only, signed-in Identity users only. See netlify/functions/points.js
+# and points-lib.js.
+[[redirects]]
+  from = "/api/points"
+  to = "/.netlify/functions/points"
+  status = 200
+
 # Importer is a background function, not a page route.
 # It must be triggered on a schedule (see the background importer function).
 # Do NOT put supplier, storage, or CDN credentials in this file — use Netlify environment variables.

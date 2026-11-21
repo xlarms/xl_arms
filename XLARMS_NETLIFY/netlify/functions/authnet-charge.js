@@ -52,10 +52,21 @@
 // pattern). A staff alert email goes to info@xlarms.us. Email failure never
 // fails an order that is already charged — the record is stored first and
 // the failure is logged.
+//
+// Points/rewards (v1, 2026-11-21 — see netlify/functions/points-lib.js):
+// Earn 1 point per $1 of ITEMS total (whole dollars, floor); redeem 100
+// points = $5 off in 100-point blocks, ship-to-FFL orders only, account
+// holders only. The account user comes ONLY from
+// `context.clientContext.user` (Netlify populates it from a valid Identity
+// JWT) — never from the request body. Ship orders earn at payment success;
+// pickup orders earn nothing at checkout (they earn when staff marks the
+// intake picked up — see intake-view.js). Points failures never fail an
+// already-charged order; they are logged loudly instead.
 
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const pointsLib = require('./points-lib');
 
 // --- Money: single source of truth for what an order costs. ---
 // PICKUP_FEE_CENTS: the $15.00 background-check service fee — the ONLY
@@ -395,7 +406,7 @@ function authnetErrorText(ctr) {
   return 'Payment could not be processed.';
 }
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   // --- GET: public checkout config (no secrets). ---
   if (event.httpMethod === 'GET') {
     const qs = event.queryStringParameters || {};
@@ -457,6 +468,14 @@ exports.handler = async (event) => {
   } catch (e) {
     return fail(400, 'We could not read the order. Please try again or call ' + PHONE + '.');
   }
+
+  // --- Account holder (points): the user comes ONLY from
+  // context.clientContext.user, which Netlify populates when the browser
+  // sends a valid Identity JWT as `Authorization: Bearer <token>`. The
+  // body's `email` is only the contact email and is never trusted for
+  // identity. A guest has no accountUser and earns/redeems nothing.
+  const accountUser = (context && context.clientContext && context.clientContext.user) || null;
+  const isAccountHolder = !!(accountUser && accountUser.sub);
 
   // --- Validate the order (everything the browser claims is re-checked). ---
   const fulfillment = s(body.fulfillment);
@@ -558,10 +577,55 @@ exports.handler = async (event) => {
 
   // --- Amount: pickup = $15 fee only (tax goes into the balance due at
   // pickup); ship = items + shipping + tax, charged online. ---
-  const chargeCents = fulfillment === 'pickup' ? PICKUP_FEE_CENTS : itemsCents + shippingCents + taxCents;
+  let chargeCents = fulfillment === 'pickup' ? PICKUP_FEE_CENTS : itemsCents + shippingCents + taxCents;
   const balanceDueCents = fulfillment === 'pickup' ? Math.max(0, itemsCents - PICKUP_FEE_CENTS + taxCents) : 0;
   if (!(chargeCents > 0)) {
     return fail(400, 'This order has no chargeable amount. Please call ' + PHONE + '.');
+  }
+
+  // --- Points redemption (ship-to-FFL only, account holders only). ---
+  // The browser sends body.pointsRedeem (integer, multiple of 100).
+  // Everything is validated here, BEFORE any charge: the user must be a
+  // verified Identity account holder, the order must ship, the amount
+  // must be a whole 100-point block, it must not exceed the balance, and
+  // the $5-per-100-points discount must leave a positive charge. Any
+  // failure returns 400 and charges nothing. The discount is applied
+  // after tax is computed (charge = items + shipping + tax − discount);
+  // tax itself is not recomputed on the discounted amount.
+  let pointsRedeem = 0;
+  let discountCents = 0;
+  if (body.pointsRedeem != null && body.pointsRedeem !== 0) {
+    const want = Number(body.pointsRedeem);
+    if (!isAccountHolder) {
+      return fail(400, 'Sign in to use points. Points are for account holders only.');
+    }
+    if (fulfillment !== 'ship') {
+      return fail(400, 'Points can only be used on ship-to-FFL orders — not on the $15 pickup fee.');
+    }
+    if (!Number.isInteger(want) || want < 100 || want % pointsLib.REDEEM_BLOCK_POINTS !== 0) {
+      return fail(400, 'Points can only be used in blocks of 100 (100 points = $5 off).');
+    }
+    let bal;
+    try {
+      const store = pointsLib.pointsStore(event);
+      bal = await pointsLib.getBalance(store, accountUser.sub);
+    } catch (e) {
+      console.error(`authnet-charge: points balance read failed for user ${accountUser.sub}:`, e && e.message);
+      return fail(400, 'We could not verify your points balance right now. Please try again without points, or call ' + PHONE + '.');
+    }
+    if (!bal.ok) {
+      return fail(400, 'We could not verify your points balance right now. Please try again without points, or call ' + PHONE + '.');
+    }
+    if (want > bal.balance) {
+      return fail(400, `You only have ${bal.balance} points — you asked to use ${want}.`);
+    }
+    const disc = Math.floor(want / pointsLib.REDEEM_BLOCK_POINTS) * pointsLib.REDEEM_BLOCK_VALUE_CENTS;
+    if (!(disc > 0) || disc >= chargeCents) {
+      return fail(400, 'The points discount must leave something to charge — use fewer points.');
+    }
+    pointsRedeem = want;
+    discountCents = disc;
+    chargeCents -= discountCents;
   }
 
   // Order ID: ORD-YYYYMMDD-XXXXXX (19 chars — fits Authorize.net's 20-char
@@ -694,6 +758,8 @@ exports.handler = async (event) => {
       amountCharged: chargeCents / 100,
       balanceDueAtPickup: fulfillment === 'pickup' ? balanceDueCents / 100 : null,
       customer: { firstName, lastName, phone, email, billingZip },
+      account: isAccountHolder ? { userId: accountUser.sub, email: accountUser.email } : null,
+      isAccountHolder,
       pickupDay: fulfillment === 'pickup' ? pickupDay : null,
       ffl: fulfillment === 'ship' && hasFirearm ? ffl : null,
       shippingAddress: fulfillment === 'ship' && !hasFirearm ? shippingAddress : null,
@@ -709,6 +775,56 @@ exports.handler = async (event) => {
       submitted_at: now.toISOString(),
       status: testMode ? 'test' : 'paid',
     };
+
+    // ---- Points (best-effort, never fail an already-charged order). ----
+    // Redemption: deduct the points used on this ship order — the
+    // discount was already applied to the charge above. Earning: ship
+    // orders earn floor(items total in dollars) points at payment
+    // success; pickup orders earn nothing at checkout (they earn when
+    // staff marks the intake picked up — see intake-view.js). Both are
+    // idempotent via the ledger orderId, so a retry can never
+    // award/deduct twice. A points failure is logged loudly; the order
+    // still succeeds and the customer still gets their confirmation.
+    let pointsEarned = 0;
+    let pointsBalance = null;
+    if (isAccountHolder) {
+      try {
+        const store = pointsLib.pointsStore(event);
+        if (pointsRedeem > 0) {
+          const red = await pointsLib.redeemPoints(store, accountUser.sub, pointsRedeem, orderId);
+          if (!red.redeemed) {
+            console.error(`authnet-charge ${orderId}: POINTS DEDUCTION FAILED after a successful charge (${red.reason}) — customer was charged ${money(chargeCents)} with a ${money(discountCents)} points discount but the points were NOT deducted. Manual fix needed.`);
+          }
+          pointsBalance = red.balance;
+        }
+        if (fulfillment === 'ship') {
+          const earnPts = Math.floor(itemsCents / 100);
+          if (earnPts > 0) {
+            const aw = await pointsLib.awardPoints(store, accountUser.sub, accountUser.email, earnPts, orderId, 'Online ship order');
+            if (!aw.awarded) {
+              console.error(`authnet-charge ${orderId}: points award failed (${aw.reason}) — customer was charged but did not receive ${earnPts} points. Manual fix may be needed.`);
+            } else {
+              pointsEarned = earnPts;
+            }
+            pointsBalance = aw.balance;
+          } else if (pointsBalance === null) {
+            const bal = await pointsLib.getBalance(store, accountUser.sub);
+            pointsBalance = bal.ok ? bal.balance : null;
+          }
+        } else if (pointsBalance === null) {
+          // Pickup order: no points activity at checkout. Fetch the
+          // balance best-effort for the confirmation display.
+          const bal = await pointsLib.getBalance(store, accountUser.sub);
+          pointsBalance = bal.ok ? bal.balance : null;
+        }
+      } catch (e) {
+        console.error(`authnet-charge ${orderId}: points processing failed after a successful charge:`, e && e.message);
+      }
+    }
+    record.pointsRedeemed = pointsRedeem;
+    record.pointsDiscount = discountCents / 100;
+    record.pointsEarned = pointsEarned;
+    record.pointsBalance = pointsBalance;
 
     if (process.env.WASABI_BUCKET && process.env.WASABI_KEY && process.env.WASABI_SECRET) {
       try {
@@ -770,6 +886,9 @@ exports.handler = async (event) => {
       taxRate,
       fulfillment,
       balanceDueAtPickup: fulfillment === 'pickup' ? balanceDueCents / 100 : null,
+      pointsRedeemed,
+      pointsEarned,
+      pointsBalance,
       mode: m,
       testMode,
     });

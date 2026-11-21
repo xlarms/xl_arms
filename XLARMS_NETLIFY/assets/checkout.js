@@ -31,6 +31,124 @@
   var selectedFFL = null;     // { name, street, city, state, zip } from the dealer search
   var paying = false;
 
+  // --- Points/rewards (v1, 2026-11-21): account holders only. ---
+  // identityUser/identityJwt come from the Netlify Identity widget; the
+  // server only trusts the user Netlify derives from the JWT, never the
+  // request body. Guests have no identityUser and see no points.
+  // pointsBalance is null until /api/points answers (or when signed out).
+  // pointsToUse is the validated amount the customer wants to redeem.
+  var identityUser = null;
+  var identityJwt = null;
+  var pointsBalance = null;
+  var pointsToUse = 0;
+
+  // Points discount for the current order (ship only, account holders
+  // only): $5 per 100 points, in 100-point blocks.
+  function pointsDiscountCents() {
+    if (fulfillment !== 'ship' || !identityUser || pointsToUse <= 0) return 0;
+    return Math.floor(pointsToUse / 100) * 500;
+  }
+  // Largest redeemable amount (points) given the balance and the order
+  // total: the discount must leave at least $0.01 to charge.
+  function maxRedeemablePoints() {
+    if (fulfillment !== 'ship' || !identityUser || pointsBalance == null) return 0;
+    var preDiscount = itemsCents() + shipCents() + taxCents();
+    var byCharge = Math.floor(Math.max(0, preDiscount - 1) / 500) * 100;
+    var byBalance = Math.floor(pointsBalance / 100) * 100;
+    return Math.max(0, Math.min(byCharge, byBalance));
+  }
+  // Points this order would earn: 1 per $1 of items total.
+  function earnEstimate() {
+    return Math.floor(itemsCents() / 100);
+  }
+
+  // Netlify Identity (account holders only). Never blocks checkout: if
+  // the widget is missing or sign-in fails, the customer is a guest and
+  // checks out normally with no points.
+  function initIdentity() {
+    if (typeof netlifyIdentity === 'undefined') return;
+    try {
+      netlifyIdentity.on('init', function (u) { setIdentityUser(u); });
+      netlifyIdentity.on('login', function (u) { setIdentityUser(u); });
+      netlifyIdentity.on('logout', function () { setIdentityUser(null); });
+      var u = netlifyIdentity.currentUser();
+      if (u) setIdentityUser(u);
+    } catch (e) { /* Identity unavailable — guest checkout */ }
+  }
+  function setIdentityUser(u) {
+    identityUser = u || null;
+    identityJwt = null;
+    pointsBalance = null;
+    pointsToUse = 0;
+    if (u) {
+      try {
+        var p = u.jwt();
+        if (p && typeof p.then === 'function') {
+          p.then(function (t) { identityJwt = t; loadPointsBalance(); }).catch(function () { identityJwt = null; });
+        } else if (typeof p === 'string') {
+          identityJwt = p; loadPointsBalance();
+        }
+      } catch (e) { identityJwt = null; }
+    }
+    renderTotals();
+    renderPointsSection();
+  }
+  function loadPointsBalance() {
+    if (!identityJwt) return;
+    fetch('/api/points', { headers: { 'Authorization': 'Bearer ' + identityJwt } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) pointsBalance = Number(d.balance) || 0;
+        renderTotals();
+        renderPointsSection();
+      })
+      .catch(function () { pointsBalance = null; renderTotals(); renderPointsSection(); });
+  }
+  // "Use points" section (ship orders only, signed in, balance known).
+  // The input is validated here; the server re-validates everything
+  // before charging, so a tampered value can never change the charge.
+  function renderPointsSection() {
+    var box = $('pointsSection');
+    if (!box) return;
+    if (fulfillment !== 'ship' || !identityUser || pointsBalance == null) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    var worth = Math.floor(pointsBalance / 100) * 5;
+    box.style.display = '';
+    box.innerHTML = '<p><strong>Use your points</strong> — you have <strong>' + pointsBalance + ' points</strong> (worth $' + worth + ' off).</p>'
+      + '<label class="co-field">Points to use (multiples of 100)'
+      + '<input id="pointsInput" type="number" min="0" step="100" value="' + pointsToUse + '"></label>'
+      + '<p class="meta">100 points = $5 off, in 100-point blocks. Points can only be used on ship-to-FFL orders.</p>'
+      + '<p id="pointsMsg" class="meta"></p>';
+    var input = $('pointsInput');
+    if (input) input.addEventListener('change', onPointsInput);
+  }
+  function onPointsInput() {
+    var input = $('pointsInput');
+    var msg = $('pointsMsg');
+    var raw = input ? Number(input.value) : 0;
+    var max = maxRedeemablePoints();
+    var v = Math.floor(raw || 0);
+    if (v < 0) v = 0;
+    if (v % 100 !== 0) v = Math.floor(v / 100) * 100;
+    var clamped = false;
+    if (v > max) { v = max; clamped = true; }
+    pointsToUse = v;
+    if (input) input.value = v;
+    if (msg) {
+      if (clamped) {
+        msg.textContent = 'Most you can use on this order is ' + max + ' points ($' + (Math.floor(max / 100) * 5) + ' off).';
+      } else if (v > 0) {
+        msg.textContent = 'Using ' + v + ' points — $' + (Math.floor(v / 100) * 5) + ' off this order.';
+      } else {
+        msg.textContent = pointsBalance > 0 ? '' : 'You have no points to use yet — this order will earn ' + earnEstimate() + ' points.';
+      }
+    }
+    renderTotals();
+  }
+
   function $(id) { return document.getElementById(id); }
   function show(el, on) { if (el) el.style.display = on ? '' : 'none'; }
   function setText(id, t) { var el = $(id); if (el) el.textContent = t; }
@@ -79,9 +197,13 @@
     }
     return Math.round(base * taxRate);
   }
-  // What the customer is charged today, in cents.
+  // What the customer is charged today, in cents. Ship orders are
+  // reduced by any points discount (display only — the server recomputes
+  // it on every charge).
   function chargeCents() {
-    return fulfillment === 'pickup' ? pickupFeeCents() : itemsCents() + shipCents() + taxCents();
+    var base = fulfillment === 'pickup' ? pickupFeeCents() : itemsCents() + shipCents() + taxCents();
+    if (fulfillment === 'ship') base = Math.max(0, base - pointsDiscountCents());
+    return base;
   }
   function balanceDueCents() {
     return fulfillment === 'pickup' ? Math.max(0, itemsCents() - pickupFeeCents() + taxCents()) : 0;
@@ -158,11 +280,15 @@
       } else {
         taxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong> <span class="meta">— included in your balance due at pickup.</span></p>';
       }
+      var pickupPts = identityUser
+        ? '<p class="meta">You\'ll earn ~' + earnEstimate() + ' points when your pickup is complete. Points can\'t be applied to the $15 fee online.</p>'
+        : '';
       t.innerHTML = '<p>Items total: <strong>' + money(itemsCents() / 100) + '</strong></p>'
         + '<p>Due today (background-check service fee): <strong>' + money(pickupFeeCents() / 100) + '</strong></p>'
         + taxRow
         + '<p>Balance due at pickup: <strong>' + money(balanceDueCents() / 100) + (taxKnown ? '' : ' + tax') + '</strong> — your $15 is credited toward the price.</p>'
-        + '<p class="meta">You pay only the $15 online. The balance is paid at pickup, after you pass the background check.</p>';
+        + '<p class="meta">You pay only the $15 online. The balance is paid at pickup, after you pass the background check.</p>'
+        + pickupPts;
     } else {
       var dest = destForTax();
       var ship = shipCents();
@@ -183,9 +309,14 @@
       } else {
         shipTaxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong></p>';
       }
+      var ptsDisc = pointsDiscountCents();
+      var ptsRow = ptsDisc > 0 ? '<p>Points discount: <strong>&minus;' + money(ptsDisc / 100) + '</strong></p>' : '';
+      var earnRow = identityUser ? '<p class="meta">You\'ll earn ~' + earnEstimate() + ' points on this order.</p>' : '';
       t.innerHTML = '<p>Items total: <strong>' + money(itemsCents() / 100) + '</strong></p>'
         + shipRow
         + shipTaxRow
+        + ptsRow
+        + earnRow
         + '<p>Due today: <strong>' + money(chargeCents() / 100) + (shipKnown ? '' : ' + shipping') + (taxKnown ? '' : ' + tax') + '</strong></p>';
     }
     var btn = $('payButton');
@@ -216,6 +347,7 @@
       ? 'Your order has no firearms, so it ships to your address — no FFL needed.'
       : '';
     renderTotals();
+    renderPointsSection();
     updateTax(); // refresh the sales-tax rate for the new destination
     setPayEnabled(!!config && !!config.configured && acceptReady);
   }
@@ -397,9 +529,18 @@
         shippingAddress: customer.shippingAddress,
         opaqueData: { dataDescriptor: od.dataDescriptor, dataValue: od.dataValue },
       };
+      // Points redemption (ship only, signed in): the server re-validates
+      // everything — balance, 100-point blocks, ship-only — before
+      // charging, so a tampered value can never change the charge.
+      if (fulfillment === 'ship' && identityUser && pointsToUse > 0) payload.pointsRedeem = pointsToUse;
+      // Identity JWT (account holders only): the server derives the user
+      // from this token and never trusts an ID from the body. Guests send
+      // no header and check out normally with no points.
+      var headers = { 'Content-Type': 'application/json' };
+      if (identityJwt) headers['Authorization'] = 'Bearer ' + identityJwt;
       var res = await fetch('/api/authnet-charge', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify(payload),
       });
       var data = null;
@@ -439,9 +580,19 @@
       + ((data.tax > 0)
         ? '<p><strong>Sales tax (Georgia' + (data.taxRate ? ' ' + fmtPct(data.taxRate) + '%' : '') + '):</strong> ' + money(data.tax) + (isPickup ? ' — included in your balance due at pickup.' : ' — included in the amount charged today.') + '</p>'
         : '')
+      + ((data.pointsRedeemed > 0)
+        ? '<p><strong>Points used:</strong> ' + data.pointsRedeemed + ' (saved $' + (Math.floor(data.pointsRedeemed / 100) * 5) + ').</p>'
+        : '')
+      + ((data.pointsEarned > 0)
+        ? '<p><strong>You earned ' + data.pointsEarned + ' points</strong> on this order.</p>'
+        : '')
+      + ((typeof data.pointsBalance === 'number')
+        ? '<p><strong>Your points balance:</strong> ' + data.pointsBalance + ' points.</p>'
+        : '')
       + (isPickup
         ? '<p><strong>Balance due at pickup:</strong> ' + money(data.balanceDueAtPickup || 0) + ' (your $15 is credited toward the price).</p>'
           + '<p><strong>Next step — send your pickup information:</strong> use the pickup intake page so we can run the background check before you come in. Bring your original Georgia ID/license and sign the official Form 4473 in person at pickup.</p>'
+          + (typeof data.pointsBalance === 'number' ? '<p class="meta">You\'ll earn points when your pickup is complete.</p>' : '')
           + '<p><a class="btn" href="pickup-intake.html?order=' + encodeURIComponent(data.orderId) + '">Send your pickup information →</a></p>'
         : '<p>Your order will ship to your receiving FFL. The FFL will run the background check and Form 4473 at their counter before you take possession. We will call you if anything is needed before shipping.</p>')
       + '<p class="meta">A confirmation email is on its way to the email address you gave. Questions? Call <a href="tel:+16786916375">(678) 691-6375</a>, 7 days 10am–6pm EST.</p>'
@@ -464,6 +615,7 @@
   async function initCheckout() {
     if (!$('checkoutForm')) return; // not the checkout page
     renderSummary();
+    initIdentity(); // account holders only — never blocks guest checkout
     // Fulfillment radios.
     var rPick = $('fulfillPickupRadio'), rShip = $('fulfillShipRadio');
     if (rPick) rPick.addEventListener('change', function () { if (rPick.checked) setFulfillment('pickup'); });

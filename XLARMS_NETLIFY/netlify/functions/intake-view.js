@@ -239,7 +239,43 @@ exports.handler = async (event) => {
         ContentType: 'application/json',
         ServerSideEncryption: 'AES256',
       }));
-      return json(200, { ok: true, id, pickup_at: r.pickup_at, status: r.status, note: 'Marked picked up. Record + ID photo will be deleted 30 days after pickup.' });
+
+      // Points (v1, 2026-11-21): a pickup order earns points when staff
+      // marks it picked up — 1 point per $1 of items total, account
+      // holders only. The intake record links to the paid order via
+      // paidOrderId (verified) or orderRef (only when it looks like a
+      // real order ID). The order record must have isAccountHolder true
+      // and an account.userId — phone orders paid via intake-charge carry
+      // no account link, so they earn nothing. A points failure is
+      // logged but never fails the staff action.
+      let pointsAwarded = 0;
+      try {
+        const orderRef = r.paidOrderId || r.orderRef || '';
+        if (orderRef && /^ORD-\d{8}-[0-9a-f]{6}$/.test(orderRef)) {
+          const orderRes = await client.send(new GetObjectCommand({
+            Bucket: bucket,
+            Key: `orders-private/${orderRef}/record.json`,
+          }));
+          const order = JSON.parse((await streamToBuffer(orderRes.Body)).toString('utf8'));
+          if (order && order.isAccountHolder && order.account && order.account.userId) {
+            const pts = Math.floor(Number(order.itemsTotal) || 0);
+            if (pts > 0) {
+              const pointsLib = require('./points-lib');
+              const store = pointsLib.pointsStore(event);
+              const aw = await pointsLib.awardPoints(store, order.account.userId, order.account.email, pts, orderRef, 'Pickup completed');
+              if (aw.awarded) {
+                pointsAwarded = pts;
+                console.log(`intake-view pickedup ${id}: awarded ${pts} points to user ${order.account.userId} for order ${orderRef}.`);
+              } else {
+                console.log(`intake-view pickedup ${id}: points not awarded (${aw.reason}) for order ${orderRef}.`);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`intake-view pickedup ${id}: points award failed (pickup still recorded):`, e && e.message);
+      }
+      return json(200, { ok: true, id, pickup_at: r.pickup_at, status: r.status, pointsAwarded, note: 'Marked picked up. Record + ID photo will be deleted 30 days after pickup.' });
     }
 
     return json(400, { ok: false, error: 'Unknown action. Use action=list, detail, photo or pickedup.' });
