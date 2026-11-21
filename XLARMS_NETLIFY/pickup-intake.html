@@ -191,6 +191,7 @@
   <div><h4>Contact</h4><span>Norcross, GA</span><br><a href="tel:+16786916375">(678) 691-6375</a><a href="mailto:info@xlarms.us">info@xlarms.us</a><span>7 days a week 10am–6pm EST</span></div>
   <div><h4>FFL Notice</h4><p>Firearms ship to your FFL, not to your home. You must be 18 or older to enter this site.</p><div class="paybadges"><img src="images/payments/visa.svg" alt="Visa"><img src="images/payments/mastercard.svg" alt="Mastercard"><img src="images/payments/amex.svg" alt="American Express"><img src="images/payments/discover.svg" alt="Discover"></div><div class="paybadges"><span>Authorize.net</span><span>256-bit SSL</span><span>PCI DSS</span><span>Chase Paymentech</span></div><p class="meta">Secure checkout — pay online by card.</p></div>
 </div><div class="fine">© 2026 XL Arms — Premium Firearms &amp; Tactical Equipment | All Rights Reserved. <a href="credits.html">Photo Credits</a>. Prices are MAP/MSRP.</div></div></footer>
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 <script>
 (function(){
 var form=document.getElementById('pickupForm');
@@ -309,7 +310,21 @@ toggleQ12();toggleNonCitizen();
           clearCard();
           // Charge the $15 fee, then re-send the intake against the new
           // paid order. The intake was NOT stored before payment.
-          var chargeRes=await fetch('/api/intake-charge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          // Points: if the customer is signed in to an account, send
+          // their Identity JWT so the fee order is linked to the account
+          // and the pickup earns points. Guests send no header and earn
+          // nothing. Never blocks the payment if Identity is unavailable.
+          var chargeHeaders={'Content-Type':'application/json'};
+          try{
+            if(window.netlifyIdentity){
+              var iu=netlifyIdentity.currentUser();
+              if(iu){
+                var tok=await iu.jwt();
+                if(tok)chargeHeaders['Authorization']='Bearer '+tok;
+              }
+            }
+          }catch(e){/* Identity unavailable — proceed as a guest */}
+          var chargeRes=await fetch('/api/intake-charge',{method:'POST',headers:chargeHeaders,body:JSON.stringify({
             firstName:pendingPayload.firstName,
             lastName:pendingPayload.lastName,
             phone:pendingPayload.phone,

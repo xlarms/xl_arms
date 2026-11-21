@@ -558,40 +558,17 @@ exports.handler = async (event, context) => {
     shippingCents = destState === 'GA' ? SHIPPING_FLAT_RATE_GA_CENTS : SHIPPING_FLAT_RATE_OUT_OF_STATE_CENTS;
   }
 
-  // --- Georgia sales tax (destination-based; out of state = 0%). ---
-  // Pickup is always Norcross (Gwinnett County, 6%). Ship uses the
-  // destination ZIP: the receiving FFL's ZIP for a firearm order, the
-  // shipping-address ZIP otherwise. Georgia taxes delivery charges when
-  // the sale is taxable (GA DOR rule 560-12-2-.45 — a separately stated
-  // shipping charge is still taxable), so for a Georgia ship order the
-  // tax base is ITEMS + SHIPPING; pickup tax is on items only.
-  let taxRate = 0;
-  if (fulfillment === 'pickup') {
-    taxRate = 0.06; // Norcross pickup — Gwinnett County, DOR chart Oct 1 2026
-  } else if (fulfillment === 'ship' && destState === 'GA') {
-    const destZip = hasFirearm ? (ffl && ffl.zip) : (shippingAddress && shippingAddress.zip);
-    taxRate = georgiaTaxRate(destZip);
-  }
-  const taxableCents = fulfillment === 'ship' && destState === 'GA' ? itemsCents + shippingCents : itemsCents;
-  const taxCents = Math.round(taxableCents * taxRate);
-
-  // --- Amount: pickup = $15 fee only (tax goes into the balance due at
-  // pickup); ship = items + shipping + tax, charged online. ---
-  let chargeCents = fulfillment === 'pickup' ? PICKUP_FEE_CENTS : itemsCents + shippingCents + taxCents;
-  const balanceDueCents = fulfillment === 'pickup' ? Math.max(0, itemsCents - PICKUP_FEE_CENTS + taxCents) : 0;
-  if (!(chargeCents > 0)) {
-    return fail(400, 'This order has no chargeable amount. Please call ' + PHONE + '.');
-  }
-
   // --- Points redemption (ship-to-FFL only, account holders only). ---
   // The browser sends body.pointsRedeem (integer, multiple of 100).
-  // Everything is validated here, BEFORE any charge: the user must be a
-  // verified Identity account holder, the order must ship, the amount
-  // must be a whole 100-point block, it must not exceed the balance, and
-  // the $5-per-100-points discount must leave a positive charge. Any
-  // failure returns 400 and charges nothing. The discount is applied
-  // after tax is computed (charge = items + shipping + tax − discount);
-  // tax itself is not recomputed on the discounted amount.
+  // Everything is validated here, BEFORE tax is computed, so Georgia
+  // sales tax is figured on the discounted amount: for a Georgia ship
+  // order the tax base is ITEMS + SHIPPING − DISCOUNT (charge = items +
+  // shipping + tax − discount). The user must be a verified Identity
+  // account holder, the order must ship, the amount must be a whole
+  // 100-point block, it must not exceed the balance, and the discount
+  // must be less than items + shipping (so the taxable base stays
+  // positive). Any failure returns 400 and charges nothing. The
+  // post-charge `chargeCents > 0` check below stays as a backstop.
   let pointsRedeem = 0;
   let discountCents = 0;
   if (body.pointsRedeem != null && body.pointsRedeem !== 0) {
@@ -620,12 +597,38 @@ exports.handler = async (event, context) => {
       return fail(400, `You only have ${bal.balance} points — you asked to use ${want}.`);
     }
     const disc = Math.floor(want / pointsLib.REDEEM_BLOCK_POINTS) * pointsLib.REDEEM_BLOCK_VALUE_CENTS;
-    if (!(disc > 0) || disc >= chargeCents) {
-      return fail(400, 'The points discount must leave something to charge — use fewer points.');
+    if (!(disc > 0) || disc >= itemsCents + shippingCents) {
+      return fail(400, 'The points discount must be less than the order total before tax — use fewer points.');
     }
     pointsRedeem = want;
     discountCents = disc;
-    chargeCents -= discountCents;
+  }
+
+  // --- Georgia sales tax (destination-based; out of state = 0%). ---
+  // Pickup is always Norcross (Gwinnett County, 6%). Ship uses the
+  // destination ZIP: the receiving FFL's ZIP for a firearm order, the
+  // shipping-address ZIP otherwise. Georgia taxes delivery charges when
+  // the sale is taxable (GA DOR rule 560-12-2-.45 — a separately stated
+  // shipping charge is still taxable), so for a Georgia ship order the
+  // tax base is ITEMS + SHIPPING, minus any points discount (the
+  // discount lowers the taxable amount); pickup tax is on items only.
+  let taxRate = 0;
+  if (fulfillment === 'pickup') {
+    taxRate = 0.06; // Norcross pickup — Gwinnett County, DOR chart Oct 1 2026
+  } else if (fulfillment === 'ship' && destState === 'GA') {
+    const destZip = hasFirearm ? (ffl && ffl.zip) : (shippingAddress && shippingAddress.zip);
+    taxRate = georgiaTaxRate(destZip);
+  }
+  const taxableCents = fulfillment === 'ship' && destState === 'GA' ? itemsCents + shippingCents - discountCents : itemsCents;
+  const taxCents = Math.round(taxableCents * taxRate);
+
+  // --- Amount: pickup = $15 fee only (tax goes into the balance due at
+  // pickup); ship = items + shipping + tax, less any points discount,
+  // charged online. ---
+  let chargeCents = fulfillment === 'pickup' ? PICKUP_FEE_CENTS : itemsCents + shippingCents + taxCents - discountCents;
+  const balanceDueCents = fulfillment === 'pickup' ? Math.max(0, itemsCents - PICKUP_FEE_CENTS + taxCents) : 0;
+  if (!(chargeCents > 0)) {
+    return fail(400, 'This order has no chargeable amount. Please call ' + PHONE + '.');
   }
 
   // Order ID: ORD-YYYYMMDD-XXXXXX (19 chars — fits Authorize.net's 20-char
@@ -886,7 +889,7 @@ exports.handler = async (event, context) => {
       taxRate,
       fulfillment,
       balanceDueAtPickup: fulfillment === 'pickup' ? balanceDueCents / 100 : null,
-      pointsRedeemed,
+      pointsRedeemed: pointsRedeem,
       pointsEarned,
       pointsBalance,
       mode: m,

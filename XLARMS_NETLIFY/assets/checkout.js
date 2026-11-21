@@ -49,11 +49,11 @@
     return Math.floor(pointsToUse / 100) * 500;
   }
   // Largest redeemable amount (points) given the balance and the order
-  // total: the discount must leave at least $0.01 to charge.
+  // total: the server requires the discount to be less than items +
+  // shipping (so the taxable base stays positive).
   function maxRedeemablePoints() {
     if (fulfillment !== 'ship' || !identityUser || pointsBalance == null) return 0;
-    var preDiscount = itemsCents() + shipCents() + taxCents();
-    var byCharge = Math.floor(Math.max(0, preDiscount - 1) / 500) * 100;
+    var byCharge = Math.floor(Math.max(0, itemsCents() + shipCents() - 1) / 500) * 100;
     var byBalance = Math.floor(pointsBalance / 100) * 100;
     return Math.max(0, Math.min(byCharge, byBalance));
   }
@@ -187,14 +187,16 @@
   function fmtPct(r) { return String(Math.round(Number(r || 0) * 10000) / 100); }
   function taxCents() {
     // Georgia taxes delivery charges on a taxable sale, so a Georgia ship
-    // order is taxed on items + shipping; pickup (items only) and
-    // out-of-state (0%) are unchanged.
+    // order is taxed on items + shipping — minus any points discount
+    // (the discount lowers the taxable amount, as the server computes
+    // it); pickup (items only) and out-of-state (0%) are unchanged.
     if (!taxKnown) return 0;
     var base = itemsCents();
     if (fulfillment === 'ship') {
       var dest = destForTax();
-      if (dest && dest.state === 'GA') base += shipCents();
+      if (dest && dest.state === 'GA') base += shipCents() - pointsDiscountCents();
     }
+    if (base < 0) base = 0;
     return Math.round(base * taxRate);
   }
   // What the customer is charged today, in cents. Ship orders are
@@ -303,11 +305,12 @@
       if (!dest) {
         shipTaxRow = '<p>Sales tax: <span class="meta">Select a receiving FFL (or enter your shipping address) to see the Georgia sales tax for your delivery.</span></p>';
       } else if (!taxKnown) {
-        shipTaxRow = '<p>Sales tax: <strong>calculated at checkout</strong> <span class="meta">(Georgia tax on items + shipping, at your delivery rate.)</span></p>';
+        shipTaxRow = '<p>Sales tax: <strong>calculated at checkout</strong> <span class="meta">(Georgia tax on items + shipping, less any points discount, at your delivery rate.)</span></p>';
       } else if (taxRate === 0) {
         shipTaxRow = '<p>Sales tax: <strong>$0.00</strong> <span class="meta">(No sales tax — your delivery is outside Georgia.)</span></p>';
       } else {
-        shipTaxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong></p>';
+        var taxNote = pointsDiscountCents() > 0 ? ' <span class="meta">— after your points discount.</span>' : '';
+        shipTaxRow = '<p>Sales tax (GA ' + fmtPct(taxRate) + '%): <strong>' + money(taxCents() / 100) + '</strong>' + taxNote + '</p>';
       }
       var ptsDisc = pointsDiscountCents();
       var ptsRow = ptsDisc > 0 ? '<p>Points discount: <strong>&minus;' + money(ptsDisc / 100) + '</strong></p>' : '';

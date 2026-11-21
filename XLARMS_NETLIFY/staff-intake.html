@@ -256,7 +256,19 @@ document.getElementById('pickedUpBtn').addEventListener('click',async function()
   note.textContent='Saving…';
   try{
     var data=await api('pickedup',{method:'POST',body:{id:currentId}});
-    note.textContent='Marked picked up. Record + ID photo will be deleted 30 days after pickup.';
+    if(data&&data.needsSaleAmount){
+      // Phone order: the gun price is not on file, so points cannot be
+      // worked out until staff enter the sale amount. The intake is NOT
+      // marked picked up yet — retry with the amount.
+      var amt=prompt('Sale amount (gun price) in dollars:');
+      if(amt===null){note.textContent='Not marked picked up — the sale amount is needed to award points. Enter it and try again.';return;}
+      var sale=Number(String(amt).replace(/[^0-9.]/g,''));
+      if(!sale||sale<=0){note.textContent='Not marked picked up — enter a sale amount above $0 to award points.';return;}
+      note.textContent='Saving…';
+      data=await api('pickedup',{method:'POST',body:{id:currentId,saleAmount:sale}});
+    }
+    var pts=(data&&typeof data.pointsAwarded==='number'&&data.pointsAwarded>0)?(' Awarded '+data.pointsAwarded+' points.'):'';
+    note.textContent='Marked picked up.'+pts+' Record + ID photo will be deleted 30 days after pickup.';
     loadDetail(currentId);
   }catch(err){note.textContent='Could not mark picked up: '+err.message;}
 });

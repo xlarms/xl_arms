@@ -22,6 +22,14 @@
 //   info@xlarms.us. Email failure never fails a charge that already
 //   succeeded — the record is stored first.
 //
+//   Points (v1, 2026-11-21): if the customer is signed in to a Netlify
+//   Identity account, the JWT they send (Authorization: Bearer) is read
+//   from context.clientContext.user and the account link is stored on the
+//   order record (account + isAccountHolder), so the pickup earns points
+//   when staff marks it picked up (see intake-view.js). Guests have no
+//   account link and earn nothing. The body's email is only the contact
+//   email and is never trusted for identity.
+//
 //   Test mode (Transaction Processing Mode disabled) never creates a
 //   transaction: the gateway answers with a flat "Successful." and no
 //   createTransactionResponse. That is treated as a test approval with
@@ -87,11 +95,19 @@ function wasabiClient() {
   };
 }
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   try {
     if (event.httpMethod !== 'POST') {
       return json(405, { ok: false, error: 'Method not allowed.' });
     }
+
+    // --- Account holder (points): the user comes ONLY from
+    // context.clientContext.user, which Netlify populates when the browser
+    // sends a valid Identity JWT as `Authorization: Bearer <token>`. The
+    // body's `email` is only the contact email and is never trusted for
+    // identity. A guest has no accountUser and earns no points.
+    const accountUser = (context && context.clientContext && context.clientContext.user) || null;
+    const isAccountHolder = !!(accountUser && accountUser.sub);
 
     const m = mode();
     const apiLoginID = process.env.AUTHNET_API_LOGIN_ID;
@@ -241,6 +257,11 @@ exports.handler = async (event) => {
         submitted_at: now.toISOString(),
         status: testMode ? 'test' : 'paid',
         intakeFee: true,
+        // Points: account link for a signed-in customer, so the pickup
+        // earns points when staff marks it picked up (intake-view.js).
+        // Guests have no account link and earn nothing.
+        account: isAccountHolder ? { userId: accountUser.sub, email: accountUser.email } : null,
+        isAccountHolder,
       };
 
       if (process.env.WASABI_BUCKET && process.env.WASABI_KEY && process.env.WASABI_SECRET) {

@@ -21,9 +21,17 @@
 //          staff secret and expires 15 minutes after it is issued.
 //          This is the short-lived signed link — it is not a public URL and
 //          it is not on the Bunny CDN.
-//   POST ?action=pickedup  { id }   (secret required)
+//   POST ?action=pickedup  { id, saleAmount? }   (secret required)
 //        → marks a submission picked up: sets pickup_at + status. This is
 //          what starts the 30-day retention clock (see intake-cleanup.js).
+//          Awards points for the pickup (1 point per $1, account holders
+//          only): online-checkout pickups use the order's itemsTotal; a
+//          phone order (kind 'intake-pickup-fee') has no gun price on
+//          file, so staff must pass saleAmount (the gun price in dollars)
+//          — without a valid saleAmount a phone-order pickup is NOT
+//          marked picked up and the response is
+//          { ok:false, needsSaleAmount:true } (HTTP 200) so the staff
+//          page can prompt and retry.
 //
 // Auth: send the secret as header X-Intake-Secret (preferred) or as
 // ?secret=... . Do not share the secret with customers; do not put it in a
@@ -230,6 +238,68 @@ exports.handler = async (event) => {
       if (!id) return json(400, { ok: false, error: 'A valid submission id is required.' });
       const r = await getRecord(client, bucket, id);
       if (r.pickup_at) return json(200, { ok: true, id, pickup_at: r.pickup_at, status: r.status, note: 'Already marked picked up.' });
+
+      // Points (v1, 2026-11-21): a pickup order earns points when staff
+      // marks it picked up — 1 point per $1 of items total, account
+      // holders only. The intake record links to the paid order via
+      // paidOrderId (verified) or orderRef (only when it looks like a
+      // real order ID). The order record must have isAccountHolder true
+      // and an account.userId — a guest order earns nothing.
+      //
+      // The gun price differs by order kind, so it is resolved BEFORE
+      // the intake is marked picked up:
+      //   - online-checkout pickup (kind 'online-order'): the order's
+      //     itemsTotal is the gun price — no saleAmount needed.
+      //   - phone order (kind 'intake-pickup-fee'): the fee order only
+      //     holds the $15 fee, not the gun price — staff must pass
+      //     saleAmount (the gun price in dollars). Without a valid
+      //     saleAmount the pickup is NOT marked yet; the staff page
+      //     prompts for the amount and retries. This is a deliberate
+      //     hold, not a failure.
+      // If the order cannot be loaded, or it is not an account-holder
+      // order, the pickup is marked normally with no points (the points
+      // award is best-effort; it never blocks the staff action).
+      let pointsToAward = 0;
+      let pointsUserId = null;
+      let pointsEmail = '';
+      let pointsOrderRef = '';
+      let pointsNote = 'Pickup completed';
+      try {
+        const orderRef = r.paidOrderId || r.orderRef || '';
+        if (orderRef && /^ORD-\d{8}-[0-9a-f]{6}$/.test(orderRef)) {
+          const orderRes = await client.send(new GetObjectCommand({
+            Bucket: bucket,
+            Key: `orders-private/${orderRef}/record.json`,
+          }));
+          const order = JSON.parse((await streamToBuffer(orderRes.Body)).toString('utf8'));
+          if (order && order.isAccountHolder && order.account && order.account.userId) {
+            if (order.kind === 'intake-pickup-fee') {
+              const sale = Number(body.saleAmount);
+              if (!Number.isFinite(sale) || sale <= 0) {
+                return json(200, { ok: false, needsSaleAmount: true, error: 'Enter the sale amount (gun price) to award points.' });
+              }
+              pointsToAward = Math.floor(sale);
+              pointsUserId = order.account.userId;
+              pointsEmail = order.account.email || '';
+              pointsOrderRef = orderRef;
+              pointsNote = 'Pickup completed — phone order';
+            } else {
+              const pts = Math.floor(Number(order.itemsTotal) || 0);
+              if (pts > 0) {
+                pointsToAward = pts;
+                pointsUserId = order.account.userId;
+                pointsEmail = order.account.email || '';
+                pointsOrderRef = orderRef;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`intake-view pickedup ${id}: order lookup failed (pickup will be marked, no points):`, e && e.message);
+        pointsToAward = 0;
+        pointsUserId = null;
+      }
+
       r.pickup_at = new Date().toISOString();
       r.status = 'picked-up';
       await client.send(new PutObjectCommand({
@@ -240,40 +310,23 @@ exports.handler = async (event) => {
         ServerSideEncryption: 'AES256',
       }));
 
-      // Points (v1, 2026-11-21): a pickup order earns points when staff
-      // marks it picked up — 1 point per $1 of items total, account
-      // holders only. The intake record links to the paid order via
-      // paidOrderId (verified) or orderRef (only when it looks like a
-      // real order ID). The order record must have isAccountHolder true
-      // and an account.userId — phone orders paid via intake-charge carry
-      // no account link, so they earn nothing. A points failure is
-      // logged but never fails the staff action.
+      // Award the points (best-effort — a failure is logged but never
+      // fails the staff action, which is already recorded).
       let pointsAwarded = 0;
-      try {
-        const orderRef = r.paidOrderId || r.orderRef || '';
-        if (orderRef && /^ORD-\d{8}-[0-9a-f]{6}$/.test(orderRef)) {
-          const orderRes = await client.send(new GetObjectCommand({
-            Bucket: bucket,
-            Key: `orders-private/${orderRef}/record.json`,
-          }));
-          const order = JSON.parse((await streamToBuffer(orderRes.Body)).toString('utf8'));
-          if (order && order.isAccountHolder && order.account && order.account.userId) {
-            const pts = Math.floor(Number(order.itemsTotal) || 0);
-            if (pts > 0) {
-              const pointsLib = require('./points-lib');
-              const store = pointsLib.pointsStore(event);
-              const aw = await pointsLib.awardPoints(store, order.account.userId, order.account.email, pts, orderRef, 'Pickup completed');
-              if (aw.awarded) {
-                pointsAwarded = pts;
-                console.log(`intake-view pickedup ${id}: awarded ${pts} points to user ${order.account.userId} for order ${orderRef}.`);
-              } else {
-                console.log(`intake-view pickedup ${id}: points not awarded (${aw.reason}) for order ${orderRef}.`);
-              }
-            }
+      if (pointsToAward > 0 && pointsUserId) {
+        try {
+          const pointsLib = require('./points-lib');
+          const store = pointsLib.pointsStore(event);
+          const aw = await pointsLib.awardPoints(store, pointsUserId, pointsEmail, pointsToAward, pointsOrderRef, pointsNote);
+          if (aw.awarded) {
+            pointsAwarded = pointsToAward;
+            console.log(`intake-view pickedup ${id}: awarded ${pointsToAward} points to user ${pointsUserId} for order ${pointsOrderRef}.`);
+          } else {
+            console.log(`intake-view pickedup ${id}: points not awarded (${aw.reason}) for order ${pointsOrderRef}.`);
           }
+        } catch (e) {
+          console.error(`intake-view pickedup ${id}: points award failed (pickup still recorded):`, e && e.message);
         }
-      } catch (e) {
-        console.error(`intake-view pickedup ${id}: points award failed (pickup still recorded):`, e && e.message);
       }
       return json(200, { ok: true, id, pickup_at: r.pickup_at, status: r.status, pointsAwarded, note: 'Marked picked up. Record + ID photo will be deleted 30 days after pickup.' });
     }
