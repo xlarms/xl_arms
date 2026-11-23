@@ -109,7 +109,12 @@ async function findPaidPickupOrder(orderRef, phone) {
   if (ORDER_ID_RE.test(ref)) {
     const rec = await getOrderRecord(client, bucket, ref.toUpperCase());
     if (isPaidPickupOrder(rec)) return rec.id;
-    return null;
+    // Fall through to the phone scan below: a mistyped order number (or a
+    // record that is not a paid pickup order) must not block the lookup —
+    // the customer's phone number can still find their paid $15 fee.
+    // (2026-11-23: a customer typed his order number, the direct lookup
+    // missed, and the old `return null` here never tried his phone, so the
+    // page kept asking him to pay again.)
   }
   // 2) Phone fallback: the customer entered a phone number instead of an
   // order number. Scan the most recent pickup order records for this
